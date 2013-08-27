@@ -121,7 +121,7 @@
 
 /******** AUDIODSP memory setting ************************/
 #define AUDIODSP_ADDR_START U_ALIGN(RESERVED_MEM_START) /*audiodsp memstart*/
-#define AUDIODSP_ADDR_END   (AUDIODSP_ADDR_START+SZ_1M-1)   /*audiodsp memend*/
+#define AUDIODSP_ADDR_END   (AUDIODSP_ADDR_START+SZ_1M-1) /*audiodsp memend*/
 
 /******** Frame buffer memory configuration ***********/
 #define OSD_480_PIX         (640*480)
@@ -134,29 +134,20 @@
 #define DOUBLE_BUFFER   (2)
 
 #define OSD1_MAX_MEM        U_ALIGN(OSD_1080_PIX*B32BpP*DOUBLE_BUFFER)
-#define OSD2_MAX_MEM        U_ALIGN(32*32*B32BpP)
+#define OSD2_MAX_MEM        U_ALIGN(OSD_1080_PIX*B32BpP*DOUBLE_BUFFER)
 
 /******** Reserved memory configuration ***************/
 #define OSD1_ADDR_START     U_ALIGN(AUDIODSP_ADDR_END )
 #define OSD1_ADDR_END       (OSD1_ADDR_START+OSD1_MAX_MEM - 1)
 #define OSD2_ADDR_START     U_ALIGN(OSD1_ADDR_END)
-#define OSD2_ADDR_END       (OSD2_ADDR_START +OSD2_MAX_MEM -1)
-
-/*
-#if defined(CONFIG_AM_VDEC_H264)
-#define CODEC_MEM_SIZE      U_ALIGN(32*SZ_1M)
-#else
-#define CODEC_MEM_SIZE      U_ALIGN(16*SZ_1M)
-#endif
-*/
-
+#define OSD2_ADDR_END       (OSD2_ADDR_START+OSD2_MAX_MEM - 1)
 
 #if defined(CONFIG_AM_VDEC_H264MVC)
-	#define CODEC_MEM_SIZE U_ALIGN(64*SZ_1M) 
+#define CODEC_MEM_SIZE U_ALIGN(64*SZ_1M) 
 #elif defined(CONFIG_AM_VDEC_H264) 
-	#define CODEC_MEM_SIZE U_ALIGN(32*SZ_1M) 
+#define CODEC_MEM_SIZE U_ALIGN(32*SZ_1M) 
 #else 
-	#define CODEC_MEM_SIZE U_ALIGN(16*SZ_1M) 
+#define CODEC_MEM_SIZE U_ALIGN(16*SZ_1M) 
 #endif
 
 #define CODEC_ADDR_START    U_ALIGN(OSD2_ADDR_END)
