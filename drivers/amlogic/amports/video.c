@@ -3567,6 +3567,13 @@ static struct class amvideo_class = {
 
 static struct device *amvideo_dev;
 
+int adjust_vsync_pts_inc(int val){
+    printk("Vsync pts inc(before): %d\n", val);
+    int newval = val * (1000-2)/1000;
+    printk("Vsync pts inc(after): %d\n", newval);
+    return newval;
+}
+
 int vout_notify_callback(struct notifier_block *block, unsigned long cmd , void *para)
 {
     const vinfo_t *info;
@@ -3585,6 +3592,7 @@ int vout_notify_callback(struct notifier_block *block, unsigned long cmd , void 
   	vinfo = info;
 	/* pre-calculate vsync_pts_inc in 90k unit */
     	vsync_pts_inc = 90000 * vinfo->sync_duration_den / vinfo->sync_duration_num;
+	vsync_pts_inc = adjust_vsync_pts_inc(vsync_pts_inc);
 	spin_unlock_irqrestore(&lock, flags);
 	break;
 	case VOUT_EVENT_OSD_PREBLEND_ENABLE:
@@ -3662,6 +3670,7 @@ static void vout_hook(void)
 
     if (vinfo) {
         vsync_pts_inc = 90000 * vinfo->sync_duration_den / vinfo->sync_duration_num;
+        vsync_pts_inc = adjust_vsync_pts_inc(vsync_pts_inc);
     }
 
 #ifdef CONFIG_AM_VIDEO_LOG
