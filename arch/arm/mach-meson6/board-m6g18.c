@@ -539,13 +539,12 @@ static pinmux_set_t aml_uart_ao = {
     .pinmux = &uart_pins[0]
 };
 
-static struct aml_uart_platform  __initdata aml_uart_plat = {
+static struct aml_uart_platform aml_uart_plat = {
     .uart_line[0]   = UART_AO,
     .uart_line[1]   = UART_A,
     .uart_line[2]   = UART_B,
     .uart_line[3]   = UART_C,
     .uart_line[4]   = UART_D,
-
     .pinmux_uart[0] = (void*)&aml_uart_ao,
     .pinmux_uart[1] = NULL,
     .pinmux_uart[2] = NULL,
