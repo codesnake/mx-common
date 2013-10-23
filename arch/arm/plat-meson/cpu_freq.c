@@ -261,7 +261,7 @@ static int meson_cpufreq_init(struct cpufreq_policy *policy)
     policy->cur = clk_get_rate(cpufreq.armclk) / 1000;
 
     /* FIXME: what's the actual transition time? */
-    policy->cpuinfo.transition_latency = 200 * 1000;
+    policy->cpuinfo.transition_latency = 20 * 1000;
 
     if (is_smp()) {
         /* Both cores must be set to same frequency.  Set affected_cpus to all. */
