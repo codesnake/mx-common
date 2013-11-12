@@ -1,3 +1,8 @@
+This kernel is planed to be retierd from official MX Linux builds,
+the repo will be lightly maintained for unofficial builds.
+
+EOL Date: TBA
+
 	Linux kernel release 3.x <http://kernel.org/>
 
 These are the release notes for Linux version 3.  Read them carefully,
