@@ -131,7 +131,7 @@ static const struct snd_pcm_hardware aml_pcm_hardware = {
 	.buffer_bytes_max	= 128 * 1024,
 
 	.rate_min = 8000,
-	.rate_max = 48000,
+	.rate_max = 192000,
 	.channels_min = 2,
 	.channels_max = 8,
 	.fifo_size = 0,
@@ -986,8 +986,8 @@ static int aml_pcm_copy_playback(struct snd_pcm_runtime *runtime, int channel,
         }
         for(j=0; j< n; j+= 64){
           for(i=0; i<8; i++){
-            *left++  =  (*tfrom ++);
-            *right++  = (*tfrom ++);
+            *left++  =  (*tfrom ++)>>8;
+            *right++  = (*tfrom ++)>>8;
           }
           left += 8;
           right += 8;
