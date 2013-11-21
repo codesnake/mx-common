@@ -131,7 +131,11 @@ static const struct snd_pcm_hardware aml_pcm_hardware = {
 	.buffer_bytes_max	= 128 * 1024,
 
 	.rate_min = 8000,
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
 	.rate_max = 192000,
+#else
+	.rate_max = 48000,
+#endif
 	.channels_min = 2,
 	.channels_max = 8,
 	.fifo_size = 0,
