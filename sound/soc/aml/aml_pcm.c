@@ -26,6 +26,7 @@
 #include <linux/amports/amaudio.h>
 
 #include <mach/mod_gate.h>
+#include <mach/cpu.h>
 
 #include "aml_pcm.h"
 #include "aml_audio_hw.h"
