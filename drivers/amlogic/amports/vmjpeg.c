@@ -88,6 +88,7 @@ MODULE_AMLOG(LOG_LEVEL_ERROR, 0, LOG_LEVEL_DESC, LOG_DEFAULT_MASK_DESC);
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6  
 //#define NV21
 #endif
+static DEFINE_MUTEX(vmjpeg_mutex);
 
 static struct dec_sysinfo vmjpeg_amstream_dec_info;
 
@@ -667,11 +668,15 @@ static s32 vmjpeg_init(void)
 static int amvdec_mjpeg_probe(struct platform_device *pdev)
 {
     struct resource *mem;
-
+	
+    mutex_lock(&vmjpeg_mutex);
+	
     amlog_level(LOG_LEVEL_INFO, "amvdec_mjpeg probe start.\n");
 
     if (!(mem = platform_get_resource(pdev, IORESOURCE_MEM, 0))) {
         amlog_level(LOG_LEVEL_ERROR, "amvdec_mjpeg memory resource undefined.\n");
+        mutex_unlock(&vmjpeg_mutex);
+		
         return -EFAULT;
     }
 
@@ -682,9 +687,12 @@ static int amvdec_mjpeg_probe(struct platform_device *pdev)
 
     if (vmjpeg_init() < 0) {
         amlog_level(LOG_LEVEL_ERROR, "amvdec_mjpeg init failed.\n");
-
+        mutex_unlock(&vmjpeg_mutex);
+		
         return -ENODEV;
     }
+	
+    mutex_unlock(&vmjpeg_mutex);
 
     amlog_level(LOG_LEVEL_INFO, "amvdec_mjpeg probe end.\n");
 
@@ -693,6 +701,8 @@ static int amvdec_mjpeg_probe(struct platform_device *pdev)
 
 static int amvdec_mjpeg_remove(struct platform_device *pdev)
 {
+    mutex_lock(&vmjpeg_mutex);
+	
     if (stat & STAT_VDEC_RUN) {
         amvdec_stop();
         stat &= ~STAT_VDEC_RUN;
@@ -714,6 +724,8 @@ static int amvdec_mjpeg_remove(struct platform_device *pdev)
     }
 
     amvdec_disable();
+	
+    mutex_unlock(&vmjpeg_mutex);
 
     amlog_level(LOG_LEVEL_INFO, "amvdec_mjpeg remove.\n");
 

@@ -54,7 +54,6 @@ extern unsigned int clk_util_clk_msr(unsigned int clk_mux);
 
 #define FIQ_VSYNC
 
-#define BL_MAX_LEVEL 0x100
 #define PANEL_NAME    "panel"
 
 //#define PRINT_DEBUG_INFO
@@ -624,7 +623,7 @@ static void vclk_set_lcd(int lcd_type, int pll_sel, int pll_div_sel, int vclk_se
         aml_write_reg32(P_HHI_VIID_DIVIDER_CNTL, aml_read_reg32(P_HHI_VIID_DIVIDER_CNTL)|(1<<3));    //0x104c[3]:SOFT_RESET_PRE
         aml_write_reg32(P_HHI_VIID_DIVIDER_CNTL, aml_read_reg32(P_HHI_VIID_DIVIDER_CNTL)&(~(1<<1)));    //0x104c[1]:RESET_N_POST
         aml_write_reg32(P_HHI_VIID_DIVIDER_CNTL, aml_read_reg32(P_HHI_VIID_DIVIDER_CNTL)&(~(1<<0)));    //0x104c[0]:RESET_N_PRE
-        msleep(2);
+        mdelay(2);
         aml_write_reg32(P_HHI_VIID_DIVIDER_CNTL, aml_read_reg32(P_HHI_VIID_DIVIDER_CNTL)&(~((1<<7)|(1<<3))));
         aml_write_reg32(P_HHI_VIID_DIVIDER_CNTL, aml_read_reg32(P_HHI_VIID_DIVIDER_CNTL)|((1<<1)|(1<<0)));
     }
@@ -635,7 +634,7 @@ static void vclk_set_lcd(int lcd_type, int pll_sel, int pll_div_sel, int vclk_se
         aml_write_reg32(P_HHI_VID_DIVIDER_CNTL, aml_read_reg32(P_HHI_VID_DIVIDER_CNTL)|(1<<3));    //0x1066[3]:SOFT_RESET_PRE
         aml_write_reg32(P_HHI_VID_DIVIDER_CNTL, aml_read_reg32(P_HHI_VID_DIVIDER_CNTL)&(~(1<<1)));    //0x1066[1]:RESET_N_POST
         aml_write_reg32(P_HHI_VID_DIVIDER_CNTL, aml_read_reg32(P_HHI_VID_DIVIDER_CNTL)&(~(1<<0)));    //0x1066[0]:RESET_N_PRE
-        msleep(2);
+        mdelay(2);
         aml_write_reg32(P_HHI_VID_DIVIDER_CNTL, aml_read_reg32(P_HHI_VID_DIVIDER_CNTL)&(~((1<<7)|(1<<3))));
         aml_write_reg32(P_HHI_VID_DIVIDER_CNTL, aml_read_reg32(P_HHI_VID_DIVIDER_CNTL)|((1<<1)|(1<<0)));
     }
@@ -1170,7 +1169,9 @@ static void set_control_lvds(Lcd_Config_t *pConf)
 	
 	int lvds_repack, pn_swap, bit_num;
 	unsigned long data32;    
-
+	
+	aml_set_reg32_bits(P_LVDS_GEN_CNTL, 0, 3, 1);	//disable lvds fifo
+	
     data32 = (0x00 << LVDS_blank_data_r) |
              (0x00 << LVDS_blank_data_g) |
              (0x00 << LVDS_blank_data_b) ; 
@@ -1483,6 +1484,7 @@ static void lcd_sync_duration(Lcd_Config_t *pConf)
 			post_div = 6;
 			break;
 		default:
+			xd = ((pConf->lcd_timing.clk_ctrl) >> 0) & 0xf;
 			post_div = 1;
 			break;
 	}
@@ -1533,8 +1535,10 @@ static void switch_lcd_gates(Lcd_Type_t lcd_type)
     }
 }
 
+static DEFINE_MUTEX(lcd_display_mutex);
 static inline void _init_display_driver(Lcd_Config_t *pConf)
 { 
+	mutex_lock(&lcd_display_mutex);
     int lcd_type;
 	const char* lcd_type_table[]={
 		"NULL",
@@ -1574,15 +1578,19 @@ static inline void _init_display_driver(Lcd_Config_t *pConf)
             printk("Invalid LCD type.\n");
 			break;
     }
+	printk("%s finished.\n", __FUNCTION__);
+	mutex_unlock(&lcd_display_mutex);
 }
 
 static inline void _disable_display_driver(Lcd_Config_t *pConf)
 {	
+	mutex_lock(&lcd_display_mutex);
     int pll_sel, vclk_sel;	    
     
     pll_sel = ((pConf->lcd_timing.clk_ctrl) >>12) & 0x1;
     vclk_sel = ((pConf->lcd_timing.clk_ctrl) >>4) & 0x1;	
 	
+	aml_set_reg32_bits(P_LVDS_GEN_CNTL, 0, 3, 1);	//disable lvds fifo
 	aml_set_reg32_bits(P_HHI_VIID_DIVIDER_CNTL, 0, 11, 1);	//close lvds phy clk gate: 0x104c[11]
 	
 	aml_write_reg32(P_ENCT_VIDEO_EN, 0);	//disable enct
@@ -1601,7 +1609,13 @@ static inline void _disable_display_driver(Lcd_Config_t *pConf)
 		aml_set_reg32_bits(P_HHI_VID_DIVIDER_CNTL, 0, 16, 1);	//close vid1_pll gate: 0x1066[16]
 		aml_set_reg32_bits(P_HHI_VID_PLL_CNTL, 1, 30, 1);		//power down vid1_pll: 0x105c[30]
 	}
+	
+#ifdef MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+    switch_mod_gate_by_name("tcon", 0);
+    switch_mod_gate_by_name("lvds", 0);
+#endif	
 	printk("disable lcd display driver.\n");
+	mutex_unlock(&lcd_display_mutex);
 }
 
 static inline void _enable_vsync_interrupt(void)
@@ -1647,7 +1661,7 @@ static inline void _enable_vsync_interrupt(void)
         aml_write_reg32(P_VENC_INTCTRL, 0x2);
     }
 }
-static void _enable_backlight(u32 brightness_level)
+static void _enable_backlight(void)
 {
     pDev->conf.lcd_power_ctrl.backlight_ctrl?pDev->conf.lcd_power_ctrl.backlight_ctrl(ON):0;
 }
@@ -1674,10 +1688,14 @@ static const vinfo_t *lcd_get_current_info(void)
     return &pDev->lcd_info;
 }
 
+static DEFINE_MUTEX(lcd_vmode_mutex);
 static int lcd_set_current_vmode(vmode_t mode)
 {
-    if (mode != VMODE_LCD)
-        return -EINVAL;
+	mutex_lock(&lcd_vmode_mutex);
+	if (mode != VMODE_LCD) {
+		mutex_unlock(&lcd_vmode_mutex);
+		return -EINVAL;
+	}	
 #ifdef CONFIG_AM_TV_OUTPUT2
     vpp2_sel = 0;
 #endif    
@@ -1685,21 +1703,26 @@ static int lcd_set_current_vmode(vmode_t mode)
     _lcd_module_enable();
     if (VMODE_INIT_NULL == pDev->lcd_info.mode)
         pDev->lcd_info.mode = VMODE_LCD;
-    _enable_backlight(BL_MAX_LEVEL);
+    _enable_backlight();
+	mutex_unlock(&lcd_vmode_mutex);
     return 0;
 }
 
 #ifdef CONFIG_AM_TV_OUTPUT2
 static int lcd_set_current_vmode2(vmode_t mode)
 {
-    if (mode != VMODE_LCD)
-        return -EINVAL;
+	mutex_lock(&lcd_vmode_mutex);
+	if (mode != VMODE_LCD) {
+		mutex_unlock(&lcd_vmode_mutex);
+		return -EINVAL;
+	}	
     vpp2_sel = 1;
     aml_write_reg32(P_VPP2_POSTBLEND_H_SIZE, pDev->lcd_info.width);
     _lcd_module_enable();
     if (VMODE_INIT_NULL == pDev->lcd_info.mode)
         pDev->lcd_info.mode = VMODE_LCD;
-    _enable_backlight(BL_MAX_LEVEL);
+    _enable_backlight();
+	mutex_unlock(&lcd_vmode_mutex);
     return 0;
 }
 #endif
@@ -1723,11 +1746,6 @@ static int lcd_module_disable(vmode_t cur_vmod)
     _disable_backlight();
     pDev->conf.lcd_power_ctrl.power_ctrl?pDev->conf.lcd_power_ctrl.power_ctrl(OFF):0;
     _disable_display_driver(&pDev->conf);
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-    switch_mod_gate_by_name("tcon", 0);
-    switch_mod_gate_by_name("lvds", 0);
-#endif
-
     return 0;
 }
 #ifdef  CONFIG_PM
@@ -1744,7 +1762,7 @@ static int lcd_resume(void)
 {
     PRINT_INFO("lcd_resume\n");
     _lcd_module_enable();
-    _enable_backlight(BL_MAX_LEVEL);
+    _enable_backlight();
     return 0;
 }
 #endif
@@ -1820,6 +1838,7 @@ static int lcd_reboot_notifier(struct notifier_block *nb, unsigned long state, v
 		printk("shut down lcd...\n");
 		_disable_backlight();
 		pDev->conf.lcd_power_ctrl.power_ctrl?pDev->conf.lcd_power_ctrl.power_ctrl(OFF):0;
+		_disable_display_driver(&pDev->conf);
 	}
     return NOTIFY_DONE;
 }
@@ -1831,6 +1850,17 @@ static int lcd_reboot_notifier(struct notifier_block *nb, unsigned long state, v
 static unsigned short gamma_adjust_r[256];
 static unsigned short gamma_adjust_g[256];
 static unsigned short gamma_adjust_b[256];
+
+static void save_original_gamma(Lcd_Config_t *pConf)
+{
+	int i;
+	
+	for (i=0; i<256; i++) {
+        gamma_adjust_r[i] = pConf->lcd_effect.GammaTableR[i];
+        gamma_adjust_g[i] = pConf->lcd_effect.GammaTableG[i];
+		gamma_adjust_b[i] = pConf->lcd_effect.GammaTableB[i];
+    }
+}
 
 static void read_original_gamma_table(void)
 {
@@ -1909,7 +1939,7 @@ static void set_gamma_coeff(unsigned r_coeff, unsigned g_coeff, unsigned b_coeff
     }
 
 	write_gamma_table();
-	printk("with scale factor R:%u\%, G:%u\%, B:%u\%.\n", r_coeff, g_coeff, b_coeff);
+	printk("with scale factor R:%u\%, G:%u\%, B:%u\%.\n", (unsigned short)(r_coeff), (unsigned short)(g_coeff), (unsigned short)(b_coeff));
 }
 
 static const char * usage_str =
@@ -1956,7 +1986,7 @@ static ssize_t aml_lcd_gamma_debug(struct class *class, struct class_attribute *
 	unsigned int ret;
 	unsigned int i, j;
 	unsigned t[8];
-	unsigned short t_bit;
+	unsigned int t_bit;
 
     switch (buf[0])
     {
@@ -2005,7 +2035,7 @@ static ssize_t aml_lcd_gamma_debug(struct class *class, struct class_attribute *
         break;
     case 'w':
         t_bit = 0;
-        ret = sscanf(buf, "w %d", &t_bit);
+        ret = sscanf(buf, "w %u", &t_bit);
         if (t_bit == 8)
         {
             for (i=0; i<64; i++) {
@@ -2048,7 +2078,7 @@ static ssize_t aml_lcd_gamma_debug(struct class *class, struct class_attribute *
             ret = sscanf(buf, "fr %u", &t_bit);
             t_bit &= 0xff;
             for (i=0; i<256; i++) {
-                pDev->conf.lcd_effect.GammaTableR[i] = t_bit<<2;
+                pDev->conf.lcd_effect.GammaTableR[i] = (unsigned short)(t_bit<<2);
             }
             write_gamma_table();
             printk("with R fixed value %u finished.\n", t_bit);
@@ -2058,7 +2088,7 @@ static ssize_t aml_lcd_gamma_debug(struct class *class, struct class_attribute *
             ret = sscanf(buf, "fg %u", &t_bit);
             t_bit &= 0xff; 
             for (i=0; i<256; i++) {
-                pDev->conf.lcd_effect.GammaTableG[i] = t_bit<<2;
+                pDev->conf.lcd_effect.GammaTableG[i] = (unsigned short)(t_bit<<2);
             }
             write_gamma_table();
             printk("with G fixed value %u finished.\n", t_bit);
@@ -2068,7 +2098,7 @@ static ssize_t aml_lcd_gamma_debug(struct class *class, struct class_attribute *
             ret = sscanf(buf, "fb %u", &t_bit);
             t_bit &= 0xff;
             for (i=0; i<256; i++) {
-                pDev->conf.lcd_effect.GammaTableB[i] = t_bit<<2;
+                pDev->conf.lcd_effect.GammaTableB[i] = (unsigned short)(t_bit<<2);
             }
             write_gamma_table();
             printk("with B fixed value %u finished.\n", t_bit);
@@ -2078,9 +2108,9 @@ static ssize_t aml_lcd_gamma_debug(struct class *class, struct class_attribute *
             ret = sscanf(buf, "fw %u", &t_bit);
             t_bit &= 0xff;
             for (i=0; i<256; i++) {
-                pDev->conf.lcd_effect.GammaTableR[i] = t_bit<<2;
-                pDev->conf.lcd_effect.GammaTableG[i] = t_bit<<2;
-                pDev->conf.lcd_effect.GammaTableB[i] = t_bit<<2;
+                pDev->conf.lcd_effect.GammaTableR[i] = (unsigned short)(t_bit<<2);
+                pDev->conf.lcd_effect.GammaTableG[i] = (unsigned short)(t_bit<<2);
+                pDev->conf.lcd_effect.GammaTableB[i] = (unsigned short)(t_bit<<2);
             }
             write_gamma_table();
             printk("with fixed value %u finished.\n", t_bit);
@@ -2116,6 +2146,7 @@ static struct class aml_gamma_class = {
 //****************************
 static Lcd_Config_t lcd_config_temp;
 static int lvds_repack_temp, pn_swap_temp;
+static unsigned short last_h_active, last_v_active;
 
 static Lvds_Phy_Control_t lcd_lvds_phy_control = 
 {
@@ -2251,14 +2282,29 @@ static void lcd_signals_ports_ctrl(Bool_t status)
 
 static void scale_framebuffer(void)
 {		
-	if ((pDev->conf.lcd_basic.h_active != lcd_config_temp.lcd_basic.h_active) || (pDev->conf.lcd_basic.v_active != lcd_config_temp.lcd_basic.v_active)) 
-	{
+	pDev->lcd_info.sync_duration_num = pDev->conf.lcd_timing.sync_duration_num;
+	pDev->lcd_info.sync_duration_den = pDev->conf.lcd_timing.sync_duration_den;
+	if ((pDev->conf.lcd_basic.h_active != last_h_active) || (pDev->conf.lcd_basic.v_active != last_v_active)) {
+		pDev->lcd_info.width = pDev->conf.lcd_basic.h_active;
+		pDev->lcd_info.height = pDev->conf.lcd_basic.v_active;
+		pDev->lcd_info.field_height = pDev->conf.lcd_basic.v_active;		
+#ifdef CONFIG_AM_TV_OUTPUT2		
+		if (vpp2_sel)
+			aml_write_reg32(P_VPP2_POSTBLEND_H_SIZE, pDev->lcd_info.width);
+		else
+			aml_write_reg32(P_VPP_POSTBLEND_H_SIZE, pDev->lcd_info.width);
+#else
+		aml_write_reg32(P_VPP_POSTBLEND_H_SIZE, pDev->lcd_info.width);
+#endif
+		
+		last_h_active = pDev->conf.lcd_basic.h_active;
+		last_v_active = pDev->conf.lcd_basic.v_active;
+	
 		printk("\nPlease input below commands:\n");
-		//printk("echo 0 0 %d %d > /sys/class/video/axis\n", pDev->conf.lcd_basic.h_active, pDev->conf.lcd_basic.v_active);
-		//printk("echo %d > /sys/class/graphics/fb0/scale_width\n", lcd_config_temp.lcd_basic.h_active);
-		//printk("echo %d > /sys/class/graphics/fb0/scale_height\n", lcd_config_temp.lcd_basic.v_active);
-		//printk("echo 1 > /sys/class/graphics/fb0/free_scale\n\n");
-		printk("fbset -fb /dev/graphics/fb0 -g %d %d %d %d 32\n\n", pDev->conf.lcd_basic.h_active, pDev->conf.lcd_basic.v_active, pDev->conf.lcd_basic.h_active, pDev->conf.lcd_basic.v_active * 2);
+		printk("echo 0 0 %d %d > /sys/class/video/axis\n", pDev->conf.lcd_basic.h_active, pDev->conf.lcd_basic.v_active);
+		printk("echo %d > /sys/class/graphics/fb0/scale_width\n", lcd_config_temp.lcd_basic.h_active);
+		printk("echo %d > /sys/class/graphics/fb0/scale_height\n", lcd_config_temp.lcd_basic.v_active);
+		printk("echo 1 > /sys/class/graphics/fb0/free_scale\n\n");		
 	}
 }
 
@@ -2365,14 +2411,21 @@ static void save_lcd_config(Lcd_Config_t *pConf)
 	lcd_config_temp.lcd_timing.pol_cntl_addr = pConf->lcd_timing.pol_cntl_addr;
 	lcd_config_temp.lcd_timing.dual_port_cntl_addr = pConf->lcd_timing.dual_port_cntl_addr;
 	
+	if(NULL==pConf->lvds_mlvds_config.lvds_config){
+		pConf->lvds_mlvds_config.lvds_config = &lcd_lvds_config;
+	}
+	
+	if(NULL==pConf->lvds_mlvds_config.lvds_phy_control){
+		pConf->lvds_mlvds_config.lvds_phy_control = &lcd_lvds_phy_control; 
+	}
+	
 	if (pConf->lcd_basic.lcd_type == LCD_DIGITAL_LVDS) {
 		lvds_repack_temp = pConf->lvds_mlvds_config.lvds_config->lvds_repack;
 		pn_swap_temp = pConf->lvds_mlvds_config.lvds_config->pn_swap;
 	}
-	else {
-		pConf->lvds_mlvds_config.lvds_config = &lcd_lvds_config;
-		pConf->lvds_mlvds_config.lvds_phy_control = &lcd_lvds_phy_control;
-	}
+	
+	last_h_active = pConf->lcd_basic.h_active;
+	last_v_active = pConf->lcd_basic.v_active;
 }
 
 static void reset_lcd_config(Lcd_Config_t *pConf)
@@ -2413,10 +2466,27 @@ static void reset_lcd_config(Lcd_Config_t *pConf)
 	lcd_tcon_config(&pDev->conf);
 	_init_display_driver(&pDev->conf);
 	lcd_signals_ports_ctrl(ON);
-	if (res)
-	{
-		printk("\nPlease input below commands:\n");		
-		printk("fbset -fb /dev/graphics/fb0 -g %d %d %d %d 32\n\n", pDev->conf.lcd_basic.h_active, pDev->conf.lcd_basic.v_active, pDev->conf.lcd_basic.h_active, pDev->conf.lcd_basic.v_active * 2);
+	
+	pDev->lcd_info.sync_duration_num = pDev->conf.lcd_timing.sync_duration_num;
+    pDev->lcd_info.sync_duration_den = pDev->conf.lcd_timing.sync_duration_den;
+	if (res) {
+		pDev->lcd_info.width = pDev->conf.lcd_basic.h_active;
+		pDev->lcd_info.height = pDev->conf.lcd_basic.v_active;
+		pDev->lcd_info.field_height = pDev->conf.lcd_basic.v_active;
+#ifdef CONFIG_AM_TV_OUTPUT2		
+		if (vpp2_sel)
+			aml_write_reg32(P_VPP2_POSTBLEND_H_SIZE, pDev->lcd_info.width);
+		else
+			aml_write_reg32(P_VPP_POSTBLEND_H_SIZE, pDev->lcd_info.width);
+#else
+		aml_write_reg32(P_VPP_POSTBLEND_H_SIZE, pDev->lcd_info.width);
+#endif
+		
+		last_h_active = pConf->lcd_basic.h_active;
+		last_v_active = pConf->lcd_basic.v_active;
+		
+		printk("\nPlease input below commands:\n");
+		printk("echo 0 > /sys/class/graphics/fb0/free_scale\n\n");
 	}
 }
 
@@ -2456,8 +2526,8 @@ static ssize_t lcd_debug(struct class *class, struct class_attribute *attr, cons
 			t[2] = 0;
 			ret = sscanf(buf, "clock %d %d %d", &t[0], &t[1], &t[2]);
 			pDev->conf.lcd_timing.lcd_clk = t[0];
-			pDev->conf.lcd_timing.clk_ctrl = pDev->conf.lcd_timing.clk_ctrl & ~(0xf << CLK_CTRL_SS) | ((t[1] << CLK_CTRL_SS) | (1 << CLK_CTRL_AUTO));
-			pDev->conf.lcd_timing.pol_cntl_addr = pDev->conf.lcd_timing.pol_cntl_addr & ~(1 << LCD_CPH1_POL) | (t[2] << LCD_CPH1_POL),
+			pDev->conf.lcd_timing.clk_ctrl = ((pDev->conf.lcd_timing.clk_ctrl & ~(0xf << CLK_CTRL_SS)) | ((t[1] << CLK_CTRL_SS) | (1 << CLK_CTRL_AUTO)));
+			pDev->conf.lcd_timing.pol_cntl_addr = ((pDev->conf.lcd_timing.pol_cntl_addr & ~(1 << LCD_CPH1_POL)) | (t[2] << LCD_CPH1_POL)),
 			printk("write lcd clock config:\n");
 			printk("lcd_clk=%dHz, ss_level=%d, clk_pol=%s\n", t[0], t[1], ((t[2] == 1) ? "positive" : "negative"));			
 			break;
@@ -2473,7 +2543,7 @@ static ssize_t lcd_debug(struct class *class, struct class_attribute *attr, cons
 			pDev->conf.lcd_timing.hsync_bp = t[1];
 			pDev->conf.lcd_timing.vsync_width = t[3];
 			pDev->conf.lcd_timing.vsync_bp = t[4];
-			pDev->conf.lcd_timing.pol_cntl_addr = pDev->conf.lcd_timing.pol_cntl_addr & ~((1 << LCD_HS_POL) | (1 << LCD_VS_POL)) | ((t[2] << LCD_HS_POL) | (t[5] << LCD_VS_POL));
+			pDev->conf.lcd_timing.pol_cntl_addr = ((pDev->conf.lcd_timing.pol_cntl_addr & ~((1 << LCD_HS_POL) | (1 << LCD_VS_POL))) | ((t[2] << LCD_HS_POL) | (t[5] << LCD_VS_POL)));
 			printk("hs_width=%d, hs_bp=%d, hs_pol=%s, vs_width=%d, vs_bp=%d, vs_pol=%s\n", t[0], t[1], ((t[2] == 1) ? "positive" : "negative"), t[3], t[4], ((t[5] == 1) ? "positive" : "negative"));
 			break;
 		case 't':			
@@ -2551,7 +2621,7 @@ static ssize_t lcd_debug(struct class *class, struct class_attribute *attr, cons
 				init_lvds_phy(&pDev->conf);	
 			}
 			pDev->conf.lcd_power_ctrl.power_ctrl?pDev->conf.lcd_power_ctrl.power_ctrl(ON):0;							
-			_enable_backlight(BL_MAX_LEVEL);
+			_enable_backlight();
 			break;
 		default:
 			printk("wrong format of lcd debug command.\n");			
@@ -2580,6 +2650,7 @@ static struct notifier_block lcd_reboot_nb;
 static int lcd_probe(struct platform_device *pdev)
 {
     struct aml_lcd_platform *pdata;    
+	int ret = 0;
 
     pdata = pdev->dev.platform_data;
     pDev = (lcd_dev_t *)kmalloc(sizeof(lcd_dev_t), GFP_KERNEL);    
@@ -2595,29 +2666,20 @@ static int lcd_probe(struct platform_device *pdev)
 
     _lcd_init(&pDev->conf);    
 	
-	int err;
 	lcd_reboot_nb.notifier_call = lcd_reboot_notifier;
-    err = register_reboot_notifier(&lcd_reboot_nb);
-	if (err)
+    ret = register_reboot_notifier(&lcd_reboot_nb);
+	if (ret)
 	{
 		printk("notifier register lcd_reboot_notifier fail!\n");
 	}
-	
-	int ret;
 	
 	save_lcd_config(&pDev->conf);
 	ret = class_register(&aml_lcd_debug_class);
 	if(ret){
 		printk("class register aml_lcd_debug_class fail!\n");
 	}
-#ifdef CONFIG_AML_GAMMA_DEBUG	
-	int i;
-	for (i=0; i<256; i++) {
-        gamma_adjust_r[i] = pDev->conf.lcd_effect.GammaTableR[i];
-        gamma_adjust_g[i] = pDev->conf.lcd_effect.GammaTableG[i];
-		gamma_adjust_b[i] = pDev->conf.lcd_effect.GammaTableB[i];
-    }
-	
+#ifdef CONFIG_AML_GAMMA_DEBUG
+	save_original_gamma(&pDev->conf);
 	ret = class_register(&aml_gamma_class);
 	if(ret){
 		printk("class register aml_gamma_class fail!\n");

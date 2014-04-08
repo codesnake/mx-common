@@ -26,14 +26,15 @@
 #include <linux/amports/vframe_provider.h>
 #include <linux/amports/vframe_receiver.h>
 #include "vdec_reg.h"
+#include <linux/delay.h>
 
 #define ENC_CANVAS_OFFSET  AMVENC_CANVAS_INDEX
 
 #define LOG_LEVEL_VAR 1
-#define debug_level(level, x...) \	
-	do { \		
-		if (level >= LOG_LEVEL_VAR) \			
-			printk(x); \	
+#define debug_level(level, x...) \
+	do { \
+		if (level >= LOG_LEVEL_VAR) \
+			printk(x); \
 	} while (0);
 
 #define PUT_INTERVAL        (HZ/100)
@@ -51,7 +52,7 @@ MODULE_AMLOG(LOG_LEVEL_ERROR, 0, LOG_LEVEL_DESC, LOG_DEFAULT_MASK_DESC);
 #include "encoder.h"
 #include "amvdec.h"
 #include "encoder_mc.h"
-static avc_device_major = 0;
+static int avc_device_major = 0;
 static struct class *amvenc_avc_class;
 static struct device *amvenc_avc_dev;
 #define DRIVER_NAME "amvenc_avc"
@@ -66,19 +67,19 @@ static struct device *amvenc_avc_dev;
 */
 
 /*output buffer define*/
-static unsigned BitstreamStart;  
+static unsigned BitstreamStart;
 static unsigned BitstreamEnd;  
-static unsigned BitstreamIntAddr  ;   
+//static unsigned BitstreamIntAddr;   
 /*input buffer define*/
-static unsigned dct_buff_start_addr ;  
-static unsigned dct_buff_end_addr   ;
+static unsigned dct_buff_start_addr;  
+static unsigned dct_buff_end_addr;
 
 /*deblock buffer define*/
-static unsigned dblk_buf_addr     ;    
-static unsigned dblk_buf_canvas		;	
+//static unsigned dblk_buf_addr;    
+static unsigned dblk_buf_canvas;	
 
 /*reference buffer define*/
-static unsigned ref_buf_addr ; //192
+//static unsigned ref_buf_addr ; //192
 static unsigned ref_buf_canvas;  //((192<<16)|(192<<8)|(192<<0))
 
 /*microcode assitant buffer*/
@@ -86,14 +87,15 @@ static unsigned assit_buffer_offset;
 //static struct dec_sysinfo avc_amstream_dec_info;
 
 static u32 stat;
-static u32 cur_stage;          
+//static u32 cur_stage;          
 static u32 frame_start;//0: processing 1:restart
 static u32 quant = 28;
 static u32 encoder_width = 1280;
 static u32 encoder_height = 720;
 static void avc_prot_init(void);
-static void avc_local_init(void);
-static u32 buf_start, buf_size;
+static s32 avc_poweron(void);
+static void dma_flush(unsigned buf_start , unsigned buf_size );
+//static void avc_local_init(void);
 static int idr_pic_id = 0;  //need reset as 0 for IDR
 static u32 frame_number = 0 ;   //need plus each frame
 static u32 pic_order_cnt_lsb = 0 ; //need reset as 0 for IDR and plus 2 for NON-IDR
@@ -102,12 +104,155 @@ static u32 log2_max_pic_order_cnt_lsb = 4 ;
 static u32 log2_max_frame_num =4 ;
 static u32 anc0_buffer_id =0;
 static u32 qppicture  =26;
+static u32 process_irq = 0;
+static int encode_inited = 0;
+static int encode_opened = 0;
 
 static const char avc_dec_id[] = "avc-dev";
+
+#define AMVENC_BUFFER_LEVEL_480P   0
+#define AMVENC_BUFFER_LEVEL_720P   1
+#define AMVENC_BUFFER_LEVEL_1080P 2
+
+typedef struct
+{
+    u32 buf_start;
+    u32 buf_size;
+} Buff_t;
+
+typedef struct
+{
+    u32 lev_id;
+    u32 min_buffsize;
+    u32 max_width;
+    u32 max_height;
+    Buff_t dct;
+    Buff_t dec0_y;
+    Buff_t dec0_uv;
+    Buff_t dec1_y;
+    Buff_t dec1_uv;
+    Buff_t assit;
+    Buff_t bitstream;
+} BuffInfo_t;
+
+const BuffInfo_t amvenc_buffspec[]={
+    {
+        .lev_id      = AMVENC_BUFFER_LEVEL_480P,
+        .max_width = 640,
+        .max_height = 480,
+        .min_buffsize = 0x400000,
+        .dct = {
+            .buf_start = 0,
+            .buf_size = 0xfe000,
+        },
+        .dec0_y = {
+            .buf_start = 0x100000,
+            .buf_size = 0x50000,
+        },
+        .dec0_uv = {
+            .buf_start = 0x150000,
+            .buf_size = 0x30000,
+        },
+        .dec1_y = {
+            .buf_start = 0x180000,
+            .buf_size = 0x50000,
+        },
+        .dec1_uv = {
+            .buf_start = 0x1d0000,
+            .buf_size = 0x30000,
+        },
+        .assit = {
+            .buf_start = 0x240000,
+            .buf_size = 0xc0000,
+        },
+        .bitstream = {
+            .buf_start = 0x300000,
+            .buf_size = 0x100000,
+        }
+    },{
+        .lev_id      = AMVENC_BUFFER_LEVEL_720P,
+        .max_width = 1280,
+        .max_height = 720,
+        .min_buffsize = 0x800000,
+        .dct = {
+            .buf_start = 0,
+            .buf_size = 0x2f8000,
+        },
+        .dec0_y = {
+            .buf_start = 0x300000,
+            .buf_size = 0xf0000,
+        },
+        .dec0_uv = {
+            .buf_start = 0x400000,
+            .buf_size = 0x80000,
+        },
+        .dec1_y = {
+            .buf_start = 0x480000,
+            .buf_size = 0xf0000,
+        },
+        .dec1_uv = {
+            .buf_start = 0x580000,
+            .buf_size = 0x80000,
+        },
+        .assit = {
+            .buf_start = 0x640000,
+            .buf_size = 0xc0000,
+        },
+        .bitstream = {
+            .buf_start = 0x700000,
+            .buf_size = 0x100000,
+        }
+    },{
+        .lev_id      = AMVENC_BUFFER_LEVEL_1080P,
+        .max_width = 1920,
+        .max_height = 1088,
+        .min_buffsize = 0xf00000,
+        .dct = {
+            .buf_start = 0,
+            .buf_size = 0x6ba000,
+        },
+        .dec0_y = {
+            .buf_start = 0x6d0000,
+            .buf_size = 0x1fe000,
+        },
+        .dec0_uv = {
+            .buf_start = 0x8d0000,
+            .buf_size = 0xff000,
+        },
+        .dec1_y = {
+            .buf_start = 0x9d0000,
+            .buf_size = 0x1fe000,
+        },
+        .dec1_uv = {
+            .buf_start = 0xbd0000,
+            .buf_size = 0xff000,
+        },
+        .assit = {
+            .buf_start = 0xd10000,
+            .buf_size = 0xc0000,
+        },
+        .bitstream = {
+            .buf_start = 0xe00000,
+            .buf_size = 0x100000,
+        }
+    }
+};
+
+typedef struct
+{
+    u32 buf_start;
+    u32 buf_size;
+    u8 cur_buf_lev; 
+    BuffInfo_t* bufspec;
+} EncBuffer_t;
+
+static EncBuffer_t gAmvencbuff = {0,0,0,NULL};
 
 static void avc_canvas_init(void);
 
 void amvenc_reset(void);
+
+/*
 static DEFINE_SPINLOCK(lock);
 
 static void avc_put_timer_func(unsigned long arg)
@@ -117,6 +262,7 @@ static void avc_put_timer_func(unsigned long arg)
 
     add_timer(timer);
 }
+*/
 
 int avc_dec_status(struct vdec_status *vstatus)
 {
@@ -152,7 +298,7 @@ static void avc_init_reference_buffer(int canvas)
 	WRITE_HREG(VLC_HCMD_CONFIG ,0);
 }
 
-static void avc_init_assit_buffer()
+static void avc_init_assit_buffer(void)
 {
 	WRITE_HREG(MEM_OFFSET_REG,assit_buffer_offset);  //memory offset ?
 }
@@ -189,49 +335,50 @@ static void avc_init_encoder(void)
 /****************************************/
 static void avc_canvas_init(void)
 {
-    int i;
     u32 canvas_width, canvas_height;
-    u32 decbuf_size, decbuf_y_size, decbuf_uv_size;
-    int dct_buf_size;
-    int output_buf_size;
-    int start_addr = buf_start;
-    /*now support maximum size is 1280*720*/	
+    int start_addr = gAmvencbuff.buf_start;
+
     canvas_width   = encoder_width;
     canvas_height  = encoder_height;
 
 	/*input dct buffer config */ 
-    dct_buf_size =   0x2f8000 ;//(1280>>4)*(720>>4)*864 0x2f7600
-    dct_buff_start_addr = start_addr ;
-    dct_buff_end_addr = buf_start + dct_buf_size -1 ;
+    dct_buff_start_addr = start_addr+gAmvencbuff.bufspec->dct.buf_start;   //(w>>4)*(h>>4)*864
+    dct_buff_end_addr = dct_buff_start_addr + gAmvencbuff.bufspec->dct.buf_size -1 ;
     debug_level(0,"dct_buff_start_addr is %x \n",dct_buff_start_addr);
 
-    decbuf_y_size  = 0xf0000;   //1280*720
-    decbuf_uv_size = 0x80000;	//1280*720/2 : NV21
-    decbuf_size    = 0x180000;	//1280*720*1.5	
-    start_addr = buf_start + 0x300000;
-	/*config as NV21*/
-    for (i = 0; i < 2; i++) {
-        canvas_config(3 * i + 0 + ENC_CANVAS_OFFSET,
-                      start_addr + i * decbuf_size,
-                      canvas_width, canvas_height,
-                      CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
-        canvas_config(3 * i + 1 + ENC_CANVAS_OFFSET,
-                      start_addr + i * decbuf_size + decbuf_y_size,
-                      canvas_width , canvas_height / 2,
-                      CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
-/*here the third plane use the same address as the second plane*/                      
-        canvas_config(3 * i + 2 + ENC_CANVAS_OFFSET,
-                      start_addr + i * decbuf_size + decbuf_y_size,
-                      canvas_width , canvas_height / 2,
-                      CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
+    canvas_config(ENC_CANVAS_OFFSET,
+        start_addr + gAmvencbuff.bufspec->dec0_y.buf_start,
+        canvas_width, canvas_height,
+        CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
+    canvas_config(1 + ENC_CANVAS_OFFSET,
+        start_addr + gAmvencbuff.bufspec->dec0_uv.buf_start,
+        canvas_width , canvas_height/2,
+        CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
+    /*here the third plane use the same address as the second plane*/                      
+    canvas_config(2 + ENC_CANVAS_OFFSET,
+        start_addr + gAmvencbuff.bufspec->dec0_uv.buf_start,
+        canvas_width , canvas_height/2,
+        CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
 
-    }
-    assit_buffer_offset = buf_start + 0x300000 + 0x300000 + 0x40000;
+    canvas_config(3 + ENC_CANVAS_OFFSET,
+        start_addr + gAmvencbuff.bufspec->dec1_y.buf_start,
+        canvas_width, canvas_height,
+        CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
+    canvas_config(4 + ENC_CANVAS_OFFSET,
+        start_addr + gAmvencbuff.bufspec->dec1_uv.buf_start,
+        canvas_width , canvas_height/2,
+        CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
+    /*here the third plane use the same address as the second plane*/                      
+    canvas_config(5 + ENC_CANVAS_OFFSET,
+        start_addr + gAmvencbuff.bufspec->dec1_uv.buf_start,
+        canvas_width , canvas_height/2,
+        CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
+
+    assit_buffer_offset = start_addr + gAmvencbuff.bufspec->assit.buf_start;
     debug_level(0,"assit_buffer_offset is %x \n",assit_buffer_offset);
 	/*output stream buffer config*/
-    output_buf_size = 0x100000;
-    BitstreamStart  = buf_start + 0x700000;
-    BitstreamEnd  =  BitstreamStart + output_buf_size -1;
+    BitstreamStart  = start_addr + gAmvencbuff.bufspec->bitstream.buf_start;
+    BitstreamEnd  =  BitstreamStart + gAmvencbuff.bufspec->bitstream.buf_size -1;
     debug_level(0,"BitstreamStart is %x \n",BitstreamStart);    
 
     dblk_buf_canvas = ((ENC_CANVAS_OFFSET+2) <<16)|((ENC_CANVAS_OFFSET + 1) <<8)|(ENC_CANVAS_OFFSET);
@@ -239,6 +386,7 @@ static void avc_canvas_init(void)
     debug_level(0,"dblk_buf_canvas is %d ; ref_buf_canvas is %d \n",dblk_buf_canvas , ref_buf_canvas);
 }
 
+/*
 static void init_scaler(void)
 {
 }
@@ -247,27 +395,29 @@ static void avc_local_init(void)
 {
 
 }
+*/
+
 static int encoder_status;
 static irqreturn_t enc_isr(int irq, void *dev_id)
 {
-	u32 reg;
 	int temp_canvas;
 	WRITE_HREG(HCODEC_ASSIST_MBOX1_CLR_REG, 1);
 	encoder_status  = READ_HREG(ENCODER_STATUS);
 	if((encoder_status == ENCODER_IDR_DONE)
-	||(encoder_status == ENCODER_NON_IDR_DONE)){
-	//||(encoder_status == ENCODER_SEQUENCE_DONE)
-	//||(encoder_status == ENCODER_PICTURE_DONE)){
-		temp_canvas = dblk_buf_canvas;
-		dblk_buf_canvas = ref_buf_canvas;
-		ref_buf_canvas = temp_canvas;   //current dblk buffer as next reference buffer
+	||(encoder_status == ENCODER_NON_IDR_DONE)
+	||(encoder_status == ENCODER_SEQUENCE_DONE)
+	||(encoder_status == ENCODER_PICTURE_DONE)){
 		debug_level(0,"encoder stage is %d\n",encoder_status);
 	}
-	if((encoder_status == ENCODER_IDR_DONE)
-	||(encoder_status == ENCODER_NON_IDR_DONE)){
+	if(((encoder_status == ENCODER_IDR_DONE)
+	||(encoder_status == ENCODER_NON_IDR_DONE))&&(!process_irq)){
+		temp_canvas = dblk_buf_canvas;
+		dblk_buf_canvas = ref_buf_canvas;
+		ref_buf_canvas = temp_canvas;   //current dblk buffer as next reference buffer		
 		frame_start = 1;
 		frame_number ++;
 		pic_order_cnt_lsb += 2;		
+		process_irq = 1;
 		debug_level(0,"encoder is done %d\n",encoder_status);
 	}
 	return IRQ_HANDLED;
@@ -402,22 +552,19 @@ static void avc_prot_init(void)
       case 50 : p_pic_qp_c = 39; break;
     default : p_pic_qp_c = 39; break; // should only be 51 or more (when index_offset)
     }
-	WRITE_HREG(QDCT_Q_QUANT_I,
-				(i_pic_qp_c<<22) | 
+    WRITE_HREG(QDCT_Q_QUANT_I,
+                (i_pic_qp_c<<22) | 
                 (i_pic_qp<<16) | 
                 ((i_pic_qp_c%6)<<12)|((i_pic_qp_c/6)<<8)|((i_pic_qp%6)<<4)|((i_pic_qp/6)<<0));	
 
    WRITE_HREG(QDCT_Q_QUANT_P,                
-				(p_pic_qp_c<<22) | 
+                (p_pic_qp_c<<22) | 
                 (p_pic_qp<<16) | 
                 ((p_pic_qp_c%6)<<12)|((p_pic_qp_c/6)<<8)|((p_pic_qp%6)<<4)|((p_pic_qp/6)<<0));	
 
+   //avc_init_input_buffer();
 
-
-	//avc_init_input_buffer();
-
-
-    WRITE_HREG(IGNORE_CONFIG , 
+   WRITE_HREG(IGNORE_CONFIG , 
                 (1<<31) | // ignore_lac_coeff_en
                 (1<<26) | // ignore_lac_coeff_else (<1)
                 (1<<21) | // ignore_lac_coeff_2 (<1)
@@ -425,21 +572,19 @@ static void avc_prot_init(void)
                 (1<<15) | // ignore_cac_coeff_en
                 (1<<10) | // ignore_cac_coeff_else (<1)
                 (1<<5)  | // ignore_cac_coeff_2 (<1)
-                (2<<0))    // ignore_cac_coeff_1 (<2)
-                ; 
+                (2<<0));    // ignore_cac_coeff_1 (<2)
 
     WRITE_HREG(IGNORE_CONFIG_2,
                 (1<<31) | // ignore_t_lac_coeff_en
                 (1<<26) | // ignore_t_lac_coeff_else (<1)
                 (1<<21) | // ignore_t_lac_coeff_2 (<1)
                 (5<<16) | // ignore_t_lac_coeff_1 (<5)
-                (0<<0))
-                ; 
+                (0<<0));
 
     WRITE_HREG(QDCT_MB_CONTROL,
                 (1<<9) | // mb_info_soft_reset
-                (1<<0) ) // mb read buffer soft reset
-              ;
+                (1<<0)); // mb read buffer soft reset
+
     WRITE_HREG(QDCT_MB_CONTROL,
               (0<<28) | // ignore_t_p8x8
               (0<<27) | // zero_mc_out_null_non_skipped_mb
@@ -458,8 +603,10 @@ static void avc_prot_init(void)
               (1<<10) | // mb_info_en
               (avc_endian<<3) | // endian
               (1<<1) | // mb_read_en
-              (0<<0))   // soft reset
-            ; // soft reset
+              (0<<0));   // soft reset
+
+
+    WRITE_HREG(CURR_CANVAS_CTRL,0);
     //debug_level(0,"current endian is %d \n" , avc_endian);
     data32 = READ_HREG(VLC_CONFIG);
     data32 = data32 | (1<<0); // set pop_coeff_even_all_zero
@@ -485,6 +632,7 @@ void amvenc_reset(void)
     READ_VREG(DOS_SW_RESET1);
 
 }
+
 void amvenc_start(void)
 {
     READ_VREG(DOS_SW_RESET1);
@@ -524,65 +672,7 @@ void amvenc_stop(void)
     READ_VREG(DOS_SW_RESET1);
 }
 
-
-#if 0
-static void *mc_addr=NULL;
-static dma_addr_t mc_addr_map;
-#define MC_SIZE (4096 * 4)
-
-s32 amvenc_loadmc(const u32 *p)
-{
-    ulong timeout;
-    s32 ret = 0;
-    return ret;
-	if(mc_addr==NULL)
-	{
-		mc_addr = kmalloc(MC_SIZE, GFP_KERNEL);
-		printk("Alloc new mc addr to %p\n",mc_addr);
-	}
-    if (!mc_addr) {
-        return -ENOMEM;
-    }
-
-    memcpy(mc_addr, p, MC_SIZE);
-    printk("address 0 is 0x%x\n", *((u32*)mc_addr));
-    printk("address 1 is 0x%x\n", *((u32*)mc_addr + 1));
-    printk("address 2 is 0x%x\n", *((u32*)mc_addr + 2));
-    printk("address 3 is 0x%x\n", *((u32*)mc_addr + 3));
-
-    mc_addr_map = dma_map_single(NULL, mc_addr, MC_SIZE, DMA_TO_DEVICE);
-	printk("mc_addr_map is 0x%x\n" ,mc_addr_map);
-    WRITE_HREG(MPSR, 0);
-    WRITE_HREG(CPSR, 0);
-
-    /* Read CBUS register for timing */
-    timeout = READ_HREG(MPSR);
-    timeout = READ_HREG(MPSR);
-
-    timeout = jiffies + HZ;
-
-    WRITE_HREG(IMEM_DMA_ADR, mc_addr_map);
-    WRITE_HREG(IMEM_DMA_COUNT, 0x1000);
-    WRITE_HREG(IMEM_DMA_CTRL, (0x8000 |  (7 << 16)));
-
-    while (READ_HREG(IMEM_DMA_CTRL) & 0x8000) {
-        if (time_before(jiffies, timeout)) {
-            schedule();
-        } else {
-            printk("hcodec load mc error\n");
-            ret = -EBUSY;
-            break;
-        }
-    }
-
-    dma_unmap_single(NULL, mc_addr_map, MC_SIZE, DMA_TO_DEVICE);
-	kfree(mc_addr);
-	mc_addr=NULL;	
-
-    return ret;
-}
-#else
-static __iomem *mc_addr=NULL;
+static void __iomem *mc_addr=NULL;
 static unsigned mc_addr_map;
 #define MC_SIZE (4096 * 4)
 s32 amvenc_loadmc(const u32 *p)
@@ -624,25 +714,34 @@ s32 amvenc_loadmc(const u32 *p)
 
     return ret;
 }
-#endif
+
 #define  DMC_SEC_PORT8_RANGE0  0x840
 #define  DMC_SEC_CTRL  0x829
-void enable_hcoder_ddr_access()
+void enable_hcoder_ddr_access(void)
 {
 	WRITE_SEC_REG(DMC_SEC_PORT8_RANGE0 , 0xffff);
 	WRITE_SEC_REG(DMC_SEC_CTRL , 0x80000000);
 }
 
-static s32 avc_check()
+static s32 avc_poweron(void)
 {
 	enable_hcoder_ddr_access();
+	// Enable Dos internal clock gating
 	hvdec_clock_enable();
+	mdelay(10);
+	return 0;
+}
+
+static s32 avc_poweroff(void)
+{
+	hvdec_clock_disable();
 	return 0;
 }
 
 static s32 avc_init(void)
 {
     int r;   
+    avc_poweron();
     avc_canvas_init();
     WRITE_HREG(HCODEC_ASSIST_MMC_CTRL1,0x2);
     debug_level(1,"start to load microcode\n");
@@ -652,60 +751,67 @@ static s32 avc_init(void)
     }	
     debug_level(1,"succeed to load microcode\n");
     //avc_canvas_init();
-    frame_start = 1;
-    idr_pic_id = -1 ;	
+    frame_start = 0;
+    idr_pic_id = 0 ;	
     frame_number = 0 ;
+    process_irq = 0;
     pic_order_cnt_lsb = 0 ;
+    encoder_status = ENCODER_IDLE ;
     amvenc_reset();
     avc_init_encoder(); 
     avc_init_input_buffer();  //dct buffer setting
     avc_init_output_buffer();  //output stream buffer
     avc_prot_init();
-    r = request_irq(INT_MAILBOX_1A, enc_isr, IRQF_SHARED, "enc-irq", (void *)avc_dec_id);	
+    r = request_irq(INT_AMVENCODER, enc_isr, IRQF_SHARED, "enc-irq", (void *)avc_dec_id);//INT_MAILBOX_1A
     avc_init_dblk_buffer(dblk_buf_canvas);   //decoder buffer , need set before each frame start
     avc_init_reference_buffer(ref_buf_canvas); //reference  buffer , need set before each frame start
     avc_init_assit_buffer(); //assitant buffer for microcode
-    //amvenc_start();
+    WRITE_HREG(ENCODER_STATUS , ENCODER_IDLE);
+    amvenc_start();
+    encode_inited = 1;
     return 0;
 }
 
-void amvenc_avc_start_cmd(int cmd)
+void amvenc_avc_start_cmd(int cmd, unsigned* input_info)
 {
-	int status= 0;
-	int need_start_cpu = 0;
 	if((cmd == ENCODER_IDR)||(cmd == ENCODER_SEQUENCE)){
 		pic_order_cnt_lsb = 0;	
 		frame_number = 0;
 	}
+
 	if(frame_number > 65535){
 		frame_number = 0;
-	}	
+	}
+#if 0
+	if((idr_pic_id == 0)&&(cmd == ENCODER_IDR))
+		frame_start = 1;
+#endif
+
 	if(frame_start){
 		frame_start = 0;
-		if(cmd != ENCODER_NON_IDR){
-			idr_pic_id ++;
-		}
-		if(idr_pic_id > 255){
-			idr_pic_id = 0;
-		}		
 		encoder_status = ENCODER_IDLE ;
 		//WRITE_HREG(HENC_SCRATCH_3,0);  //mb count 
 		//WRITE_HREG(VLC_TOTAL_BYTES ,0); //offset in bitstream buffer
-		//amvenc_reset();
-		amvenc_stop();
-		need_start_cpu = 1;
+		amvenc_reset();
 		avc_init_encoder();
+		if(cmd == ENCODER_IDR){
+			idr_pic_id ++;
+		}
+		if(idr_pic_id > 65535){
+			idr_pic_id = 0;
+		}
 		avc_init_input_buffer();
 		avc_init_output_buffer();		
 		avc_prot_init();
 		avc_init_assit_buffer(); 
-		debug_level(0,"begin to new frame %d\n");
+		debug_level(0,"begin to new frame\n");
 	}
 	avc_init_dblk_buffer(dblk_buf_canvas);   
 	avc_init_reference_buffer(ref_buf_canvas); 
-       WRITE_HREG(ENCODER_STATUS , cmd);
-	if(need_start_cpu){
-	    amvenc_start();	
+	encoder_status = cmd;
+	WRITE_HREG(ENCODER_STATUS , cmd);
+	if((cmd == ENCODER_IDR)||(cmd == ENCODER_NON_IDR)){
+		process_irq = 0;
 	}
 	debug_level(0,"amvenc_avc_start\n");
 }
@@ -714,25 +820,38 @@ void amvenc_avc_stop(void)
 {
 	//WRITE_HREG(MPSR, 0);	
 	amvenc_stop();
+	avc_poweroff();
 	debug_level(1,"amvenc_avc_stop\n");
 }
 static int amvenc_avc_open(struct inode *inode, struct file *file)
 {
     int r = 0;
     debug_level(1,"avc open\n");
-    if (avc_check() < 0) {
+    if(encode_opened>0){
+        debug_level(1, "amvenc_avc open busy.\n");
+        return -EBUSY;
+    }
+    encode_opened++;
+#if 0
+    if (avc_poweron() < 0) {
         amlog_level(LOG_LEVEL_ERROR, "amvenc_avc init failed.\n");
-
+        encode_opened--;
         return -ENODEV;
     }
+#endif
     return r;
 }
 
 static int amvenc_avc_release(struct inode *inode, struct file *file)
 {
-    free_irq(INT_MAILBOX_1A, (void *)avc_dec_id);
-    //amvdec_disable();
-    amvenc_avc_stop();
+    if(encode_inited){
+        free_irq(INT_AMVENCODER, (void *)avc_dec_id);
+        //amvdec_disable();
+        amvenc_avc_stop();
+        encode_inited = 0;
+    }
+    if(encode_opened>0)
+        encode_opened--;
     debug_level(1,"avc release\n");
     return 0;
 }
@@ -757,40 +876,44 @@ static long amvenc_avc_ioctl(struct file *file,
     unsigned* addr_info;
     unsigned buf_start;
     switch (cmd) {
-    case AMVENC_AVC_IOC_GET_ADDR:
-    // *((unsigned*)arg) 
+	case AMVENC_AVC_IOC_GET_ADDR:
 		if((ref_buf_canvas & 0xff) == (ENC_CANVAS_OFFSET)){
 			 *((unsigned*)arg)  = 1;
 		}else{
 			 *((unsigned*)arg)  = 2;	
 		}
 		break;
-    case AMVENC_AVC_IOC_INPUT_UPDATE:
+	case AMVENC_AVC_IOC_INPUT_UPDATE:
 		offset  = (unsigned*)arg ;
 		WRITE_HREG(QDCT_MB_WR_PTR, (dct_buff_start_addr+ *offset));
 		break;    
-    case AMVENC_AVC_IOC_NEW_CMD:
+	case AMVENC_AVC_IOC_NEW_CMD:
 		amrisc_cmd = *((unsigned*)arg) ;
-		amvenc_avc_start_cmd(amrisc_cmd);
+		amvenc_avc_start_cmd(amrisc_cmd, NULL);
 		break;
-    case AMVENC_AVC_IOC_GET_STAGE:
+	case AMVENC_AVC_IOC_GET_STAGE:
 		*((unsigned*)arg)  = encoder_status;
 		break; 
 	case AMVENC_AVC_IOC_GET_OUTPUT_SIZE:	
-		offset = READ_HREG(VLC_TOTAL_BYTES);
-		*((unsigned*)arg) = offset;
+		*((unsigned*)arg) = READ_HREG(VLC_TOTAL_BYTES);
 		break;
 	case AMVENC_AVC_IOC_SET_QUANT:
 		quant = *((unsigned*)arg) ;
 		break;
 	case AMVENC_AVC_IOC_SET_ENCODER_WIDTH:
-		encoder_width = *((unsigned*)arg) ;
+		if(*((unsigned*)arg)>gAmvencbuff.bufspec->max_width)
+		    *((unsigned*)arg) = gAmvencbuff.bufspec->max_width;
+		else
+		    encoder_width = *((unsigned*)arg) ;
 		break;
 	case AMVENC_AVC_IOC_SET_ENCODER_HEIGHT:
-		encoder_height = *((unsigned*)arg) ;
+		if(*((unsigned*)arg)>gAmvencbuff.bufspec->max_height)
+		    *((unsigned*)arg) = gAmvencbuff.bufspec->max_height;
+		else
+		    encoder_height = *((unsigned*)arg) ;
 		break;	
 	case AMVENC_AVC_IOC_CONFIG_INIT:
-	    avc_init();
+		avc_init();
 		break;		
 	case AMVENC_AVC_IOC_FLUSH_CACHE:
 		addr_info  = (unsigned*)arg ;
@@ -799,10 +922,10 @@ static long amvenc_avc_ioctl(struct file *file,
 			buf_start = dct_buff_start_addr;
 			break;
 			case 1:
-			buf_start = dct_buff_start_addr + 0x300000;
+			buf_start = dct_buff_start_addr + gAmvencbuff.bufspec->dec0_y.buf_start;
 			break;
 			case 2:
-			buf_start = dct_buff_start_addr + 0x480000;
+			buf_start = dct_buff_start_addr + gAmvencbuff.bufspec->dec1_y.buf_start;
 			break;
 			case 3:
 			buf_start = BitstreamStart ;
@@ -811,20 +934,19 @@ static long amvenc_avc_ioctl(struct file *file,
 			buf_start = dct_buff_start_addr;
 			break;
 		}
-	    dma_flush(buf_start + addr_info[1] ,addr_info[2] - addr_info[1]);
+		dma_flush(buf_start + addr_info[1] ,addr_info[2] - addr_info[1]);
 		break;
 	case AMVENC_AVC_IOC_FLUSH_DMA:
-	    addr_info  = (unsigned*)arg ;
 		addr_info  = (unsigned*)arg ;
 		switch(addr_info[0]){
 			case 0:
 			buf_start = dct_buff_start_addr;
 			break;
 			case 1:
-			buf_start = dct_buff_start_addr + 0x300000;
+			buf_start = dct_buff_start_addr + gAmvencbuff.bufspec->dec0_y.buf_start;
 			break;
 			case 2:
-			buf_start = dct_buff_start_addr + 0x480000;
+			buf_start = dct_buff_start_addr + gAmvencbuff.bufspec->dec1_y.buf_start;
 			break;
 			case 3:
 			buf_start = BitstreamStart ;
@@ -835,9 +957,29 @@ static long amvenc_avc_ioctl(struct file *file,
 		}	    
 		cache_flush(buf_start + addr_info[1] ,addr_info[2] - addr_info[1]);
 		break;
-     default:
+	case AMVENC_AVC_IOC_GET_BUFFINFO:
+		addr_info  = (unsigned*)arg;
+		addr_info[0] = gAmvencbuff.buf_size;
+		addr_info[1] = gAmvencbuff.bufspec->dct.buf_start;
+		addr_info[2] = gAmvencbuff.bufspec->dct.buf_size;
+		addr_info[3] = gAmvencbuff.bufspec->dec0_y.buf_start;
+		addr_info[4] = gAmvencbuff.bufspec->dec0_y.buf_size;
+		addr_info[5] = gAmvencbuff.bufspec->dec0_uv.buf_start;
+		addr_info[6] = gAmvencbuff.bufspec->dec0_uv.buf_size;
+		addr_info[7] = gAmvencbuff.bufspec->dec1_y.buf_start;
+		addr_info[8] = gAmvencbuff.bufspec->dec1_y.buf_size;
+		addr_info[9] = gAmvencbuff.bufspec->dec1_uv.buf_start;
+		addr_info[10] = gAmvencbuff.bufspec->dec1_uv.buf_size;
+		addr_info[11] = gAmvencbuff.bufspec->bitstream.buf_start;
+		addr_info[12] = gAmvencbuff.bufspec->bitstream.buf_size;
 		break;
-	}
+	case AMVENC_AVC_IOC_GET_DEVINFO:
+		strncpy((char *)arg,AMVENC_DEV_VERSION,strlen(AMVENC_DEV_VERSION));
+		break;
+	default:
+		r= -1;
+		break;
+    }
     return r;
 }
 
@@ -852,8 +994,8 @@ static int avc_mmap(struct file *filp, struct vm_area_struct *vma)
         debug_level(1,"vma_size is 0 \n");
         return -EAGAIN;
     }
-    off += buf_start;
-    debug_level(0,"vma_size is %d , off is %d \n" , vma_size ,off);
+    off += gAmvencbuff.buf_start;
+    debug_level(0,"vma_size is %d , off is %ld \n" , vma_size ,off);
     vma->vm_flags |= VM_RESERVED | VM_IO;
     //vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
     if (remap_pfn_range(vma, vma->vm_start, off >> PAGE_SHIFT,
@@ -875,9 +1017,9 @@ const static struct file_operations amvenc_avc_fops = {
 
 int  init_avc_device(void)
 {
-	int  r =0;
+    int  r =0;
     r =register_chrdev(0,DEVICE_NAME,&amvenc_avc_fops);
-    if(r  <=0) 
+    if(r<=0) 
     {
         amlog_level(LOG_LEVEL_HIGH,"register amvenc_avc device error\r\n");
         return  r  ;
@@ -888,15 +1030,17 @@ int  init_avc_device(void)
 
     amvenc_avc_dev = device_create(amvenc_avc_class, NULL,
                                   MKDEV(avc_device_major, 0), NULL,
-                                  DEVICE_NAME);    
+                                  DEVICE_NAME);
+    return r;
 }
-int uninit_avc_device()
+int uninit_avc_device(void)
 {
     device_destroy(amvenc_avc_class, MKDEV(avc_device_major, 0));
 
     class_destroy(amvenc_avc_class);
 
     unregister_chrdev(avc_device_major, DEVICE_NAME);	
+    return 0;
 }
 
 static int amvenc_avc_probe(struct platform_device *pdev)
@@ -910,14 +1054,27 @@ static int amvenc_avc_probe(struct platform_device *pdev)
         return -EFAULT;
     }
 
-    buf_start = mem->start;
-    buf_size  = mem->end - mem->start + 1;
+    gAmvencbuff.buf_start = mem->start;
+    gAmvencbuff.buf_size = mem->end - mem->start + 1;
 
-    //memcpy(&avc_amstream_dec_info, (void *)mem[1].start, sizeof(avc_amstream_dec_info));
+    if(gAmvencbuff.buf_size>=amvenc_buffspec[AMVENC_BUFFER_LEVEL_1080P].min_buffsize){
+        gAmvencbuff.cur_buf_lev = AMVENC_BUFFER_LEVEL_1080P;
+        gAmvencbuff.bufspec = (BuffInfo_t*)&amvenc_buffspec[AMVENC_BUFFER_LEVEL_1080P];
+    }else if(gAmvencbuff.buf_size>=amvenc_buffspec[AMVENC_BUFFER_LEVEL_720P].min_buffsize){
+        gAmvencbuff.cur_buf_lev = AMVENC_BUFFER_LEVEL_720P;
+        gAmvencbuff.bufspec= (BuffInfo_t*)&amvenc_buffspec[AMVENC_BUFFER_LEVEL_720P];
+    }else if(gAmvencbuff.buf_size>=amvenc_buffspec[AMVENC_BUFFER_LEVEL_480P].min_buffsize){
+        gAmvencbuff.cur_buf_lev = AMVENC_BUFFER_LEVEL_480P;
+        gAmvencbuff.bufspec= (BuffInfo_t*)&amvenc_buffspec[AMVENC_BUFFER_LEVEL_480P];
+    }else{
+        gAmvencbuff.buf_start = 0;
+        gAmvencbuff.buf_size = 0;
+        amlog_level(LOG_LEVEL_ERROR, "amvenc_avc memory resource too small, size is %d.\n",gAmvencbuff.buf_size);
+        return -EFAULT;
+    }
+    debug_level(1,"amvenc_avc  memory config sucess, buff size is 0x%x, level is %s\n",gAmvencbuff.buf_size,(gAmvencbuff.cur_buf_lev == 0)?"480P":(gAmvencbuff.cur_buf_lev == 1)?"720P":"1080P");
     init_avc_device();
-    //avc_canvas_init();
     amlog_level(LOG_LEVEL_INFO, "amvenc_avc probe end.\n");
-
     return 0;
 }
 
@@ -949,7 +1106,7 @@ static int __init amvenc_avc_driver_init_module(void)
         amlog_level(LOG_LEVEL_ERROR, "failed to register amvenc_avc driver\n");
         return -ENODEV;
     }
-	vcodec_profile_register(&amvenc_avc_profile);
+    vcodec_profile_register(&amvenc_avc_profile);
     return 0;
 }
 

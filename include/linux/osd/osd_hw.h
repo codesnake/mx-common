@@ -100,6 +100,8 @@ extern void osd_set_2x_scale_hw(u32 index,u16 h_scale_enable,u16 v_scale_enable)
 extern void osd_get_flush_rate(u32 *break_rate);
 extern void osd_set_osd_reverse_hw(u32 index, u32 reverse);
 extern void osd_get_osd_reverse_hw(u32 index, u32 *reverse);
+extern void osd_set_osd_updatestate_hw(u32 index, u32 up_free);
+extern void osd_get_osd_updatestate_hw(u32 index,u32 *up_free);
 extern void osd_setpal_hw(unsigned regno, unsigned red, unsigned green, unsigned blue, unsigned transp,int index);
 extern void osd_enable_hw(int enable,int index );
 extern void osd_pan_display_hw(unsigned int xoffset, unsigned int yoffset,int index );

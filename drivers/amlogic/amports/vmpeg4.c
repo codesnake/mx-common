@@ -81,6 +81,7 @@ MODULE_AMLOG(LOG_LEVEL_ERROR, 0, LOG_LEVEL_DESC, LOG_DEFAULT_MASK_DESC);
 #define MP4_PIC_WH          AV_SCRATCH_7
 #define MREG_BUFFERIN       AV_SCRATCH_8
 #define MREG_BUFFEROUT      AV_SCRATCH_9
+#define MP4_NOT_CODED_CNT   AV_SCRATCH_A
 #define MP4_VOP_TIME_INC    AV_SCRATCH_B
 #define MP4_OFFSET_REG      AV_SCRATCH_C
 #define MEM_OFFSET_REG      AV_SCRATCH_F
@@ -270,7 +271,7 @@ static void vmpeg4_isr(void)
     u32 picture_type;
     u32 buffer_index;
     u32 pts, pts_valid = 0, offset = 0;
-    u32 rate, vop_time_inc, duration = 3200;
+    u32 rate, vop_time_inc, repeat_cnt, duration = 3200;
 
     reg = READ_VREG(MREG_BUFFEROUT);
 
@@ -278,6 +279,7 @@ static void vmpeg4_isr(void)
         buffer_index = ((reg & 0x7) - 1) & 3;
         picture_type = (reg >> 3) & 7;
         rate = READ_VREG(MP4_RATE);
+        repeat_cnt = READ_VREG(MP4_NOT_CODED_CNT);
         vop_time_inc = READ_VREG(MP4_VOP_TIME_INC);
 
         if (vmpeg4_amstream_dec_info.width == 0) {
@@ -454,7 +456,7 @@ static void vmpeg4_isr(void)
             vf->orientation = vmpeg4_rotation;
             vf->pts = pts;
             vf->duration = duration;
-            vf->duration_pulldown = 0;
+            vf->duration_pulldown = repeat_cnt * duration;
 #ifdef NV21
             vf->type = VIDTYPE_PROGRESSIVE | VIDTYPE_VIU_FIELD | VIDTYPE_VIU_NV21;
 #else
@@ -470,10 +472,11 @@ static void vmpeg4_isr(void)
             vfbuf_use[buffer_index]++;
 
             INCPTR(fill_ptr);
+
             vf_notify_receiver(PROVIDER_NAME,VFRAME_EVENT_PROVIDER_VFRAME_READY,NULL);
         }
 
-        total_frame++;
+        total_frame += repeat_cnt + 1;
 
         WRITE_VREG(MREG_BUFFEROUT, 0);
 
@@ -720,6 +723,9 @@ static void vmpeg4_prot_init(void)
 
     /* enable mailbox interrupt */
     WRITE_VREG(ASSIST_MBOX1_MASK, 1);
+
+    /* clear repeat count */
+    WRITE_VREG(MP4_NOT_CODED_CNT, 0);
 
 #ifdef NV21
     SET_VREG_MASK(MDEC_PIC_DC_CTRL, 1<<17);

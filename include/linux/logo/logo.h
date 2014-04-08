@@ -43,7 +43,10 @@ extern	logo_object_t  aml_logo;
 #define   dev_to_platformdev(dev)   (container_of((dev), struct platform_device,dev) )
 extern struct bus_type platform_bus_type;
   	
-
+typedef enum{
+	VMODE_SETTED = 0,
+	VMODE_NOT_SETTED,
+}vmode_set_t;
 
 /***************************************************************
 *********************  para define part  *****************************
@@ -59,6 +62,8 @@ extern struct bus_type platform_bus_type;
 ***************************************************************/
 
 extern  logo_object_t* get_current_logo_obj(void);
+extern  vmode_t get_resolution_vmode(void);
+extern  vmode_set_t get_current_mode_state(void);
 extern int  register_logo_parser(logo_parser_t* logo_parser) ;
 extern int  register_logo_output_dev(logo_output_dev_t* new_dev);
 

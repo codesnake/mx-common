@@ -59,6 +59,11 @@
 #include "vdec.h"
 #include "adec.h"
 #include "rmparser.h"
+#include "ampotrs_priv.h"
+
+#ifdef CONFIG_AM_MEMPROTECT
+#include "mach/meson-secure.h"
+#endif
 
 #define DEVICE_NAME "amstream-dev"
 #define DRIVER_NAME "amstream"
@@ -98,7 +103,7 @@ void debug_file_write(const char __user *buf, size_t count)
 #endif
 
 #define DEFAULT_VIDEO_BUFFER_SIZE       (1024*1024*3)
-#define DEFAULT_AUDIO_BUFFER_SIZE       (1024*384)
+#define DEFAULT_AUDIO_BUFFER_SIZE       (1024*768*2)
 #define DEFAULT_SUBTITLE_BUFFER_SIZE     (1024*256)
 #if 0
 static ulong vbuf_start;
@@ -341,6 +346,14 @@ static stream_buf_t bufs[BUF_MAX_NUM] = {
         .first_tstamp = INVALID_PTS
     }
 };
+stream_buf_t *get_buf_by_type(u32  type)
+{
+   if(type<BUF_MAX_NUM)
+       return &bufs[type];
+   else 
+       return NULL;
+}
+
 void set_sample_rate_info(int arg)
 {
     audio_dec_info.sample_rate = arg;
@@ -720,8 +733,11 @@ static ssize_t amstream_vbuf_write(struct file *file, const char *buf,
         }
     }
 
-    r = esparser_write(file, pbuf, buf, count);
-
+	if (port->flag & PORT_FLAG_DRM){
+		r = drm_write(file, pbuf, buf, count);
+	}else{
+    	r = esparser_write(file, pbuf, buf, count);
+	}
 #ifdef DATA_DEBUG
     debug_file_write(buf, r);
 #endif
@@ -742,8 +758,14 @@ static ssize_t amstream_abuf_write(struct file *file, const char *buf,
             return r;
         }
     }
+	
+	if (port->flag & PORT_FLAG_DRM){
+		r = drm_write(file, pbuf, buf, count);
+	}else{
+    	r = esparser_write(file, pbuf, buf, count);
+	}
 
-    return esparser_write(file, pbuf, buf, count);
+    return r;
 }
 
 static ssize_t amstream_mpts_write(struct file *file, const char *buf,
@@ -876,7 +898,7 @@ static ssize_t amstream_sub_write(struct file *file, const char *buf,
             return r;
         }
     }
-
+		printk("amstream_sub_write\n");
     r = esparser_write(file, pbuf, buf, count);
     if (r < 0) {
         return r;
@@ -893,7 +915,7 @@ static unsigned int amstream_sub_poll(struct file *file, poll_table *wait_table)
     poll_wait(file, &amstream_sub_wait, wait_table);
 
     if (atomic_read(&subdata_ready)) {
-        atomic_set(&subdata_ready, 0);
+        atomic_dec(&subdata_ready);
         return POLLOUT | POLLWRNORM;
     }
 
@@ -967,12 +989,7 @@ static int amstream_open(struct inode *inode, struct file *file)
     s32 i;
     stream_port_t *s;
     stream_port_t *this = &ports[iminor(inode)];
-
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-    switch_mod_gate_by_name("demux", 1);
-    switch_mod_gate_by_name("audio", 1);
-    switch_mod_gate_by_name("vdec", 1);
-#endif
+    int err;
 
     if (iminor(inode) >= MAX_AMSTREAM_PORT_NUM) {
         return (-ENODEV);
@@ -989,6 +1006,12 @@ static int amstream_open(struct inode *inode, struct file *file)
             return (-EBUSY);
         }
     }
+
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+    switch_mod_gate_by_name("demux", 1);
+    switch_mod_gate_by_name("audio", 1);
+    switch_mod_gate_by_name("vdec", 1);
+#endif
 
     this->vid = 0;
     this->aid = 0;
@@ -1146,7 +1169,6 @@ static long amstream_ioctl(struct file *file,
         }
 
         break;
-
     case AMSTREAM_IOC_VB_STATUS:
         if (this->type & PORT_TYPE_VIDEO) {
             struct am_io_param *p = (void*)arg;
@@ -1391,7 +1413,18 @@ static long amstream_ioctl(struct file *file,
     case AMSTREAM_IOC_SET_PCRSCR:
         timestamp_pcrscr_set(arg);
         break;
-
+    case AMSTREAM_IOC_GET_LAST_CHECKIN_APTS:
+        *((u32 *)arg) = get_last_checkin_pts(PTS_TYPE_AUDIO);
+        break;
+    case AMSTREAM_IOC_GET_LAST_CHECKIN_VPTS:
+        *((u32 *)arg) = get_last_checkin_pts(PTS_TYPE_VIDEO);
+        break;
+    case AMSTREAM_IOC_GET_LAST_CHECKOUT_APTS:
+        *((u32 *)arg) = get_last_checkout_pts(PTS_TYPE_AUDIO);
+        break;
+    case AMSTREAM_IOC_GET_LAST_CHECKOUT_VPTS:
+        *((u32* )arg) = get_last_checkout_pts(PTS_TYPE_VIDEO);
+        break;
     case AMSTREAM_IOC_SUB_NUM:
         *((u32 *)arg) = psparser_get_sub_found_num();
         break;
@@ -1472,6 +1505,19 @@ static long amstream_ioctl(struct file *file,
 			put_user(0,(int *)arg);
         break;		
 		}
+	case AMSTREAM_IOC_SET_DRMMODE:
+		this->flag |= PORT_FLAG_DRM;
+		break;
+     case AMSTREAM_IOC_SET_APTS:
+        {
+            unsigned long pts;
+            if(get_user(pts, (unsigned long __user *)arg)){
+                printk("Get audio pts from user space fault! \n");
+                return -EFAULT;
+            }
+            tsync_set_apts(pts);
+            break;
+         }
     default:
         r = -ENOIOCTLCMD;
         break;
@@ -1630,6 +1676,22 @@ static ssize_t bufs_show(struct class *class, struct class_attribute *attr, char
     return pbuf - buf;
 }
 
+static ssize_t videobufused_show(struct class *class, struct class_attribute *attr, char *buf)
+{
+    int i;
+    char *pbuf = buf;
+    stream_buf_t *p = NULL;
+    p = &bufs[0];
+	if (p->flag & BUF_FLAG_IN_USE) {
+        pbuf += sprintf(pbuf, "%d ", 1);
+    } 
+	else 
+	{
+        pbuf += sprintf(pbuf, "%d ", 0);
+    }
+    return 1;
+}
+
 static ssize_t vcodec_profile_show(struct class *class, 
 								   struct class_attribute *attr, 
 								   char *buf)
@@ -1703,6 +1765,7 @@ static struct class_attribute amstream_class_attrs[] = {
     __ATTR_RO(ports),
     __ATTR_RO(bufs),
     __ATTR_RO(vcodec_profile),
+    __ATTR_RO(videobufused),
     __ATTR(canuse_buferlevel, S_IRUGO | S_IWUSR | S_IWGRP, show_canuse_buferlevel, store_canuse_buferlevel),
     __ATTR(max_buffer_delay_ms, S_IRUGO | S_IWUSR | S_IWGRP, show_maxdelay, store_maxdelay),
     __ATTR_NULL
@@ -1719,6 +1782,19 @@ static int  amstream_probe(struct platform_device *pdev)
     stream_port_t *st;
     struct resource *res;
 
+#ifdef CONFIG_AM_MEMPROTECT
+	char vbufname[] = "videostreambufconfig";
+	unsigned int vphybufstart,vphybufend,vbufsize;
+
+	r = meson_trustzone_getmemconfig(vbufname, &vphybufstart, &vphybufend);
+	if (r == 0){
+			printk("get memconfig succeed videostreambuf[0x%x-0x%x]\n", vphybufstart, vphybufend);
+			vbufsize = vphybufend - vphybufstart +1;
+	}else{
+			printk("get memconfig failed %d\n", r);
+			return r;
+	}
+#endif
     printk("Amlogic A/V streaming port init\n");
 
     r = class_register(&amstream_class);
@@ -1778,6 +1854,22 @@ static int  amstream_probe(struct platform_device *pdev)
             goto error6;
         }
     } else {
+#ifdef CONFIG_AM_MEMPROTECT
+		bufs[BUF_TYPE_VIDEO].buf_start = vphybufstart;
+		bufs[BUF_TYPE_VIDEO].buf_size = vbufsize;
+		bufs[BUF_TYPE_VIDEO].flag |= BUF_FLAG_IOMEM;
+
+		bufs[BUF_TYPE_AUDIO].buf_start = res->start;
+		bufs[BUF_TYPE_AUDIO].buf_size = DEFAULT_AUDIO_BUFFER_SIZE;
+		bufs[BUF_TYPE_AUDIO].flag |= BUF_FLAG_IOMEM;
+
+		bufs[BUF_TYPE_SUBTITLE].buf_start = res->start + bufs[BUF_TYPE_AUDIO].buf_size;
+		bufs[BUF_TYPE_SUBTITLE].buf_size = DEFAULT_SUBTITLE_BUFFER_SIZE;
+		bufs[BUF_TYPE_SUBTITLE].flag = BUF_FLAG_IOMEM; 
+		printk("amstream videostart[0x%x] size[0x%x]\n",bufs[BUF_TYPE_VIDEO].buf_start,bufs[BUF_TYPE_VIDEO].buf_size);
+		printk("amstream audiostart[0x%x] size[0x%x]\n",bufs[BUF_TYPE_AUDIO].buf_start,bufs[BUF_TYPE_AUDIO].buf_size);
+		printk("amstream substart[0x%x] size[0x%x]\n",bufs[BUF_TYPE_SUBTITLE].buf_start,bufs[BUF_TYPE_SUBTITLE].buf_size);
+#else
         bufs[BUF_TYPE_VIDEO].buf_start = res->start;
         bufs[BUF_TYPE_VIDEO].buf_size = resource_size(res) - DEFAULT_AUDIO_BUFFER_SIZE - DEFAULT_SUBTITLE_BUFFER_SIZE;
         bufs[BUF_TYPE_VIDEO].flag |= BUF_FLAG_IOMEM;
@@ -1789,6 +1881,7 @@ static int  amstream_probe(struct platform_device *pdev)
         bufs[BUF_TYPE_SUBTITLE].buf_start = res->start + resource_size(res) - DEFAULT_SUBTITLE_BUFFER_SIZE;
         bufs[BUF_TYPE_SUBTITLE].buf_size = DEFAULT_SUBTITLE_BUFFER_SIZE;
         bufs[BUF_TYPE_SUBTITLE].flag = BUF_FLAG_IOMEM;
+#endif 
     }
 
     if (stbuf_fetch_init() != 0) {
@@ -1877,7 +1970,7 @@ void set_trickmode_func(int (*trickmode_func)(unsigned long trickmode))
 
 void wakeup_sub_poll(void)
 {
-    atomic_set(&subdata_ready, 1);
+    atomic_inc(&subdata_ready);
     wake_up_interruptible(&amstream_sub_wait);
 
     return;

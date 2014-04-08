@@ -378,7 +378,7 @@ static int tsync_mode_switch(int mode,unsigned long diff_pts,int jump_pts)
 	char VA[]="VA--";
        unsigned int olddur=tsync_av_dynamic_duration_ms;
 	
-	printk("%c-discontinue,pcr=%d,vpts=%d,apts=%d,diff_pts=%lu,jump_Pts=%d\n",mode,timestamp_pcrscr_get(),timestamp_vpts_get(),timestamp_apts_get(),diff_pts,jump_pts);
+	printk("%c-discontinue,pcr=%d,vpts=%d,apts=%d,diff_pts=%d,jump_Pts=%d\n",mode,timestamp_pcrscr_get(),timestamp_vpts_get(),timestamp_apts_get(),diff_pts,jump_pts);
 	if (!tsync_enable) {
         if(tsync_mode != TSYNC_MODE_VMASTER)
 			tsync_mode = TSYNC_MODE_VMASTER;
@@ -406,8 +406,8 @@ static int tsync_mode_switch(int mode,unsigned long diff_pts,int jump_pts)
 			///
 		}
 		if(tsync_mode!=old_tsync_mode || tsync_av_mode!=old_tsync_av_mode)
-			printk("mode changes:tsync_mode:%c->%c,state:%c->%c,debugcnt=0x%x,diff_pts=%lu\n",
-			  VA[old_tsync_mode],VA[tsync_mode],old_tsync_av_mode,tsync_av_mode,debugcnt,diff_pts);
+			printk("mode changes:tsync_mode:%c->%c,state:%c->%c,debugcnt=0x%x,diff_pts=%d\n",
+			VA[old_tsync_mode],VA[tsync_mode],old_tsync_av_mode,tsync_av_mode,debugcnt,diff_pts);
 		return 0;
 	}
 
@@ -455,8 +455,8 @@ static int tsync_mode_switch(int mode,unsigned long diff_pts,int jump_pts)
 	if(olddur!=tsync_av_dynamic_duration_ms){/*duration changed,update new timeout.*/
 			tsync_av_dynamic_timeout_ms=tsync_av_latest_switch_time_ms+tsync_av_dynamic_duration_ms;
 	}
-	printk("discontinue-tsync_mode:%c->%c,state:%c->%c,debugcnt=0x%x,diff_pts=%lu tsync_mode=%d\n",
-                  VA[old_tsync_mode],VA[tsync_mode],old_tsync_av_mode,tsync_av_mode,debugcnt,diff_pts,tsync_mode);
+	printk("discontinue-tsync_mode:%c->%c,state:%c->%c,debugcnt=0x%x,diff_pts=%d tsync_mode=%d\n",
+                	VA[old_tsync_mode],VA[tsync_mode],old_tsync_av_mode,tsync_av_mode,debugcnt,diff_pts,tsync_mode);	
 	return 0;
 }
 static void tsync_state_switch_timer_fun(unsigned long arg)
@@ -566,7 +566,7 @@ void tsync_avevent_locked(avevent_t event, u32 param)
 		else
 			t = timestamp_pcrscr_get();
         	//amlog_level(LOG_LEVEL_ATTENTION, "VIDEO_TSTAMP_DISCONTINUITY, 0x%x, 0x%x\n", t, param);
-		if(abs(param-oldpts)>tsync_av_threshold_min){
+		if((abs(param-oldpts)>tsync_av_threshold_min) && (!get_vsync_pts_inc_mode())){
 			vpts_discontinue=1;
 			vpts_discontinue_diff = abs(param-t);
 			tsync_mode_switch('V',abs(param - t),param-oldpts);
@@ -596,7 +596,7 @@ void tsync_avevent_locked(avevent_t event, u32 param)
                         t = timestamp_pcrscr_get();
 				
         	amlog_level(LOG_LEVEL_ATTENTION, "AUDIO_TSTAMP_DISCONTINUITY, 0x%x, 0x%x\n", t, param);
-		if(abs(param-oldpts)>tsync_av_threshold_min){
+		if((abs(param-oldpts)>tsync_av_threshold_min) && (!get_vsync_pts_inc_mode())){
 			apts_discontinue=1;
 			apts_discontinue_diff = abs(param-t);
 			tsync_mode_switch('A',abs(param - t),param-oldpts);
@@ -679,6 +679,11 @@ void tsync_avevent_locked(avevent_t event, u32 param)
         }
         apause_flag = 0;
         timestamp_apts_start(0);
+        //reset discontinue var
+        tsync_set_sync_adiscont(0);
+        tsync_set_sync_adiscont_diff(0);
+        tsync_set_sync_vdiscont(0);
+        tsync_set_sync_vdiscont_diff(0);
         break;
 
     case AUDIO_PAUSE:
@@ -864,19 +869,25 @@ int tsync_set_apts(unsigned pts)
     	t = timestamp_vpts_get();
     else 
 	t = timestamp_pcrscr_get();
-    if(abs(oldpts-pts)>tsync_av_threshold_min){ //is discontinue 
+    if((abs(oldpts-pts)>tsync_av_threshold_min) && (!get_vsync_pts_inc_mode())){ //is discontinue 
         apts_discontinue=1;
         tsync_mode_switch('A',abs(pts - t),pts-oldpts);/*if in VMASTER ,just wait */
     }
     timestamp_apts_set(pts); 
 
-  	if(tsync_mode == TSYNC_MODE_AMASTER)
-   		t = timestamp_pcrscr_get();
+    if (get_vsync_pts_inc_mode() && (tsync_mode != TSYNC_MODE_VMASTER)) 
+    {
+        tsync_mode = TSYNC_MODE_VMASTER;
+    }
+
+    if(tsync_mode == TSYNC_MODE_AMASTER)
+        t = timestamp_pcrscr_get();
+
     if( tsync_mode == TSYNC_MODE_AMASTER ) {
         if (get_vsync_pts_inc_mode()
           && (((int)(timestamp_apts_get()-t)>(int)100*TIME_UNIT90K/1000) || (int)(t - timestamp_apts_get())>(int)500*TIME_UNIT90K/1000)){
             printk("[%d]reset apts:0x%x-->0x%x, pcr 0x%x, diff %d\n",__LINE__,oldpts,pts,t,pts-t);
-            timestamp_pcrscr_set(pts+TIME_UNIT90K/5);
+            timestamp_pcrscr_set(pts);
         } else if ((!get_vsync_pts_inc_mode()) && (abs(timestamp_apts_get()-t)>100*TIME_UNIT90K/1000)) {
             printk("[%d]reset apts:0x%x-->0x%x, pcr 0x%x, diff %d\n",__LINE__,oldpts,pts,t,pts-t);
             timestamp_pcrscr_set(pts);
@@ -1065,7 +1076,7 @@ static ssize_t store_apts(struct class *class,
                           const char *buf,
                           size_t size)
 {
-    unsigned pts;
+    unsigned pts, t;
     ssize_t r;
 
     r = sscanf(buf, "0x%x", &pts);
@@ -1372,6 +1383,14 @@ static ssize_t store_av_threshold_max(struct class *class,
     return size;
 }
 
+static ssize_t show_last_checkin_apts(struct class *class,
+                           struct class_attribute *attr,
+                           char *buf)
+{
+  unsigned long last_apts;
+  last_apts = get_last_checkin_pts(PTS_TYPE_AUDIO);
+  return sprintf(buf, "0x%x\n",last_apts);
+}
 
 static struct class_attribute tsync_class_attrs[] = {
     __ATTR(pts_video,  S_IRUGO | S_IWUSR, show_vpts,    store_vpts),
@@ -1388,6 +1407,7 @@ static struct class_attribute tsync_class_attrs[] = {
     __ATTR(debug_audio_pts, S_IRUGO | S_IWUSR, show_debug_apts,  store_debug_apts),
     __ATTR(av_threshold_min, S_IRUGO | S_IWUSR, show_av_threshold_min,  store_av_threshold_min),
     __ATTR(av_threshold_max, S_IRUGO | S_IWUSR, show_av_threshold_max,  store_av_threshold_max),
+    __ATTR(last_checkin_apts, S_IRUGO | S_IWUSR, show_last_checkin_apts, NULL),
     __ATTR_NULL
 };
 

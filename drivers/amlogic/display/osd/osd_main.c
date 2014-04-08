@@ -47,6 +47,8 @@
 #include <asm/uaccess.h>
 #include "osd_log.h"
 #include <linux/amlog.h>
+#include <linux/logo/logo_dev.h>
+#include <linux/logo/logo_dev_osd.h>
 #ifdef CONFIG_HAS_EARLYSUSPEND
 #include <linux/earlysuspend.h>
 static struct early_suspend early_suspend;
@@ -1170,6 +1172,28 @@ static ssize_t show_flush_rate(struct device *device, struct device_attribute *a
 	return snprintf(buf, PAGE_SIZE, "flush_rate:[%d]\n", flush_rate);
 }
 
+static ssize_t show_update_freescale(struct device *device, struct device_attribute *attr,
+			char *buf)
+{
+	struct fb_info *fb_info = dev_get_drvdata(device);
+	unsigned int update_state = 0;
+
+	osddev_get_update_state(fb_info->node, &update_state);
+	return snprintf(buf, PAGE_SIZE, "update_state:[%s]\n", update_state?"TRUE":"FALSE");
+}
+
+static ssize_t store_update_freescale(struct device *device, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct fb_info *fb_info = dev_get_drvdata(device);
+	unsigned int update_state = 0;
+
+	update_state = simple_strtoul(buf, NULL, 0);
+	osddev_set_update_state(fb_info->node, update_state);
+
+	return count;
+}
+
 static ssize_t show_osd_reverse(struct device *device, struct device_attribute *attr,
 			char *buf)
 {
@@ -1320,6 +1344,7 @@ static struct device_attribute osd_attrs[] = {
 	__ATTR(freescale_mode, S_IRUGO|S_IWUSR, show_freescale_mode, store_freescale_mode),
 	__ATTR(flush_rate, S_IRUGO|S_IWUSR, show_flush_rate, NULL),
 	__ATTR(osd_reverse, S_IRUGO|S_IWUSR, show_osd_reverse, store_osd_reverse),
+	__ATTR(update_freescale, S_IRUGO|S_IWUSR, show_update_freescale, store_update_freescale),
 };		
 
 #ifdef  CONFIG_PM
@@ -1397,6 +1422,9 @@ osd_probe(struct platform_device *pdev)
 	logo_object_t  *init_logo_obj=NULL;
 	int  logo_osd_index=0,i;
 	myfb_dev_t 	*fbdev = NULL;
+	vmode_t current_mode = VMODE_MASK;
+	vmode_t cvbs_mode = VMODE_MASK;
+	int hpd_state = 0;
 	
 	vout_register_client(&osd_notifier_nb);
 
@@ -1422,7 +1450,25 @@ osd_probe(struct platform_device *pdev)
 #elif(defined CONFIG_AML_TV_LCD)
 		set_current_vmode(VMODE_LVDS_1080P);
 #else
-    	set_current_vmode(VMODE_720P);	
+	if(get_current_mode_state() == VMODE_SETTED){
+		amlog_level(LOG_LEVEL_HIGH,"vmode has setted in aml logo module\r\n");
+	}else{
+		DisableVideoLayer();
+#ifdef CONFIG_AM_HDMI_ONLY
+		extern int read_hpd_gpio(void);
+		hpd_state = read_hpd_gpio();
+
+		cvbs_mode = get_current_cvbs_vmode();
+		current_mode = get_current_hdmi_vmode();
+		if (hpd_state == 0)
+			set_current_vmode(cvbs_mode);
+		else
+			set_current_vmode(current_mode);
+#else
+		current_mode = get_resolution_vmode();
+		set_current_vmode(current_mode);
+#endif
+	}
 #endif
 		osddev_init();
     	}

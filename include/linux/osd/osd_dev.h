@@ -97,6 +97,8 @@ extern int osddev_select_mode(struct myfb_dev *fbdev);
 extern void osddev_enable_3d_mode(u32 index ,u32 enable);
 extern void osddev_set_2x_scale(u32 index,u16 h_scale_enable,u16 v_scale_enable);
 extern void osddev_get_flush_rate(u32 *break_rate);
+extern void osddev_get_update_state(u32 index, u32 *up_free);
+extern void osddev_set_update_state(u32 index, u32 up_free);
 extern void osddev_get_osd_reverse(u32 index, u32 *reverse);
 extern void osddev_set_osd_reverse(u32 index, u32 reverse);
 extern void osddev_set(struct myfb_dev *fbdev);

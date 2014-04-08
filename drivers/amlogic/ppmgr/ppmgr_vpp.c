@@ -90,6 +90,11 @@ static int ppmgr_reset_type = 0;
 static struct ppframe_s vfp_pool[VF_POOL_SIZE];
 static struct vframe_s *vfp_pool_free[VF_POOL_SIZE+1];
 static struct vframe_s *vfp_pool_ready[VF_POOL_SIZE+1];
+typedef struct buf_status_s{
+	int index;
+	int dirty; 
+}buf_status_t;
+static struct buf_status_s buf_status[VF_POOL_SIZE];
 
 vfq_t q_ready, q_free;
 static int display_mode_change = VF_POOL_SIZE;
@@ -132,9 +137,9 @@ static int still_picture_notify = 0 ;
 //static int q_free_set = 0 ;
 static vframe_t *ppmgr_vf_peek(void *op_arg)
 {
-    vframe_t* vf;
     if(ppmgr_blocking)
         return NULL;
+    vframe_t* vf;
     vf = vfq_peek(&q_ready);
     return vf;
 }
@@ -143,7 +148,6 @@ static vframe_t *ppmgr_vf_get(void *op_arg)
 {
     if(ppmgr_blocking)
             return NULL;
-
     return vfq_pop(&q_ready);
 }
 
@@ -190,14 +194,12 @@ static void ppmgr_vf_video_put(ppframe_t *pp)
 static void ppmgr_vf_put(vframe_t *vf, void *op_arg)
 {
     ppframe_t *pp_vf = to_ppframe(vf);
-    ppframe_t *vf_local;
-    int i;
-    int index;
-    
     if(ppmgr_blocking)
         return;
 
-    i=vfq_level(&q_free);
+    ppframe_t *vf_local;
+    int i=vfq_level(&q_free);
+    int index;
     while(i>0)
     {
         index=(q_free.rp+i-1)%(q_free.size);
@@ -249,6 +251,7 @@ static int get_input_format(vframe_t* vf)
 {
     int format= GE2D_FORMAT_M24_YUV420;
     if(vf->type&VIDTYPE_VIU_422){
+#if 0    	
         if(vf->type &VIDTYPE_INTERLACE_BOTTOM){
             format =  GE2D_FORMAT_S16_YUV422|(GE2D_FORMAT_S16_YUV422B & (3<<3));
         }else if(vf->type &VIDTYPE_INTERLACE_TOP){
@@ -256,6 +259,16 @@ static int get_input_format(vframe_t* vf)
         }else{
             format =  GE2D_FORMAT_S16_YUV422;
         }
+#else
+		if(vf->type &VIDTYPE_INTERLACE_BOTTOM){
+			format = GE2D_FORMAT_S16_YUV422;
+		}else if(vf->type &VIDTYPE_INTERLACE_TOP){
+			format = GE2D_FORMAT_S16_YUV422;
+		}else{
+			format = GE2D_FORMAT_S16_YUV422|(GE2D_FORMAT_S16_YUV422T & (3<<3));
+		} 
+#endif
+        
     }else if(vf->type&VIDTYPE_VIU_NV21){
         if(vf->type &VIDTYPE_INTERLACE_BOTTOM){
             format =  GE2D_FORMAT_M24_NV21|(GE2D_FORMAT_M24_NV21B & (3<<3));
@@ -384,6 +397,8 @@ static int ppmgr_receiver_event_fun(int type, void *data, void *private_data)
             if(states.buf_avail_num > 0){
                 return RECEIVER_ACTIVE ;
             }else{
+                if(vf_notify_receiver(PROVIDER_NAME,VFRAME_EVENT_PROVIDER_QUREY_STATE,NULL)==RECEIVER_ACTIVE)
+                    return RECEIVER_ACTIVE;
                 return RECEIVER_INACTIVE;
             }
             break;
@@ -430,6 +445,10 @@ void vf_local_init(void)
         vfq_push(&q_free, &vfp_pool[i].frame);
     }
 
+    for(i =0 ; i < VF_POOL_SIZE ;i++ ){
+    	buf_status[i].index = ppmgr_canvas_tab[i];
+    	buf_status[i].dirty = 1;	
+    }  
     sema_init(&thread_sem,1);
 }
 
@@ -475,7 +494,7 @@ void vf_ppmgr_reset(int type)
             current_reset_time=jiffies;
             if(abs(current_reset_time-last_reset_time)<PPMGR_RESET_INTERVAL)
             {
-                printk("==[vf_ppmgr_reset]=skip=current_reset_time:%lu last_reset_time:%lu discrete:%lu  interval:%u \n",current_reset_time,last_reset_time,abs(current_reset_time-last_reset_time),PPMGR_RESET_INTERVAL);
+                printk("==[vf_ppmgr_reset]=skip=current_reset_time:%lu last_reset_time:%lu discrete:%lu  interval:%lu \n",current_reset_time,last_reset_time,abs(current_reset_time-last_reset_time),PPMGR_RESET_INTERVAL);
                 return;
             }
             ppmgr_blocking = true;
@@ -1214,6 +1233,7 @@ static void process_vf_rotate(vframe_t *vf, ge2d_context_t *context, config_para
     vframe_t *new_vf;
     ppframe_t *pp_vf;
     canvas_t cs0,cs1,cs2,cd;
+    int i;
     u32 mode = 0;
     unsigned cur_angle = 0;
     int pic_struct = 0, interlace_mode;
@@ -1228,7 +1248,11 @@ static void process_vf_rotate(vframe_t *vf, ge2d_context_t *context, config_para
     if (ppmgr_device.receiver != 0 && mode) {
         rect_w = ppmgr_device.canvas_width;
         rect_h = ppmgr_device.canvas_height;
+        mode = 0;
     }
+
+    rect_w = max(rect_w, 64);
+    rect_h = max(rect_h, 64);
 #endif
 
     new_vf = vfq_pop(&q_free);
@@ -1328,6 +1352,10 @@ static void process_vf_rotate(vframe_t *vf, ge2d_context_t *context, config_para
             scaler_y = rect_y;
             scaler_w = rect_w;
             scaler_h = rect_h;
+            for(i =0 ; i < VF_POOL_SIZE ;i++ ){
+            	buf_status[i].index = ppmgr_canvas_tab[i];
+            	buf_status[i].dirty = 1;	
+            }
             //printk("--ppmgr new rect x:%d, y:%d, w:%d, h:%d.\n", rect_x, rect_y, rect_w, rect_h);
         }
         if((!rect_w)||(!rect_h)){
@@ -1346,7 +1374,16 @@ static void process_vf_rotate(vframe_t *vf, ge2d_context_t *context, config_para
     }
 
     memset(ge2d_config,0,sizeof(config_para_ex_t));
-    if(scale_clear_count>0){
+    
+    for(i =0 ; i < VF_POOL_SIZE ;i++ ){    	
+    	if(buf_status[i].index == new_vf->canvas0Addr){
+    		break;
+    	}
+    } 
+    
+    if(buf_status[i].dirty == 1){
+    	buf_status[i].dirty = 0;
+    	//printk("--scale_clear_count is %d ------new_vf->canvas0Addr is %d ----------x:%d, y:%d, w:%d, h:%d.\n",scale_clear_count,new_vf->canvas0Addr, rect_x, rect_y, rect_w, rect_h);
     /* data operating. */
         ge2d_config->alu_const_color= 0;//0x000000ff;
         ge2d_config->bitmask_en  = 0;
@@ -1400,7 +1437,6 @@ static void process_vf_rotate(vframe_t *vf, ge2d_context_t *context, config_para
             return;
         }
         fillrect(context, 0, 0, new_vf->width, new_vf->height, 0x008080ff);
-        scale_clear_count--;
         memset(ge2d_config,0,sizeof(config_para_ex_t));
     }
 
@@ -1922,9 +1958,17 @@ static int process_vf_adjust(vframe_t *vf, ge2d_context_t *context, config_para_
     int sx,sy,sw,sh, dx,dy,dw,dh;
     unsigned ratio_x;
     unsigned ratio_y;
+    int i;
     ppframe_t *pp_vf = to_ppframe(vf);
     u32 mode = amvideo_get_scaler_para(&rect_x, &rect_y, &rect_w, &rect_h, &ratio);
     unsigned cur_angle = pp_vf->angle;
+
+    rect_w = max(rect_w, 64);
+    rect_h = max(rect_h, 64);
+
+    if (ppmgr_device.receiver != 0) {
+        mode = 0;
+    }
 
     if(!mode){
         //printk("--ppmgr adjust: scaler mode is disabled.\n");
@@ -1952,6 +1996,10 @@ static int process_vf_adjust(vframe_t *vf, ge2d_context_t *context, config_para_
     }
 
     scale_clear_count = VF_POOL_SIZE;
+    for(i =0 ; i < VF_POOL_SIZE ;i++ ){
+    	buf_status[i].index = ppmgr_canvas_tab[i];
+    	buf_status[i].dirty = 1;	
+    }    
     scaler_x = rect_x;
     scaler_y = rect_y;
     scaler_w = rect_w;
@@ -2206,16 +2254,12 @@ extern int get_tv_process_type(vframe_t* vf);
 static struct task_struct *task=NULL;
 extern int video_property_notify(int flag);
 extern vframe_t* get_cur_dispbuf(void);
-extern platform_type_t get_platform_type(void);
+extern platform_type_t get_platform_type();
 static int ppmgr_task(void *data)
 {
     struct sched_param param = {.sched_priority = MAX_RT_PRIO - 1 };
     ge2d_context_t *context=create_ge2d_work_queue();
     config_para_ex_t ge2d_config;
-    vframe_t *vf_local = NULL;
-    ppframe_t *pp_local = NULL;
-    vframe_t *vf = NULL;
-    int i;
     memset(&ge2d_config,0,sizeof(config_para_ex_t));
 
     sched_setscheduler(current, SCHED_FIFO, &param);
@@ -2224,7 +2268,7 @@ static int ppmgr_task(void *data)
     Reset3Dclear();
 #endif
     while (down_interruptible(&thread_sem) == 0) {
-        vf = NULL;
+        vframe_t *vf = NULL;
 
         if (kthread_should_stop())
             break;
@@ -2240,6 +2284,9 @@ static int ppmgr_task(void *data)
         if(scaler_pos_changed){
             scaler_pos_changed = 0;
             vf = get_cur_dispbuf();
+            if (!is_valid_ppframe(vf)) {
+                continue;
+            }
             if(vf){
                 process_vf_adjust(vf, context, &ge2d_config);
             }
@@ -2321,11 +2368,12 @@ static int ppmgr_task(void *data)
         	}
             #endif
             /***recycle buffer to decoder***/
+             int i;
              for (i=0; i < VF_POOL_SIZE; i++)
                    ppmgr_vf_video_put(&vfp_pool[i]);
 
-             vf_local = NULL;
-             pp_local=NULL;
+             vframe_t *vf_local = NULL;
+             ppframe_t *pp_local=NULL;
              vf_local=vfq_pop(&q_ready);
              while(vf_local)
              {
@@ -2405,7 +2453,7 @@ int ppmgr_buffer_init(int vout_mode)
     int i,j;
     u32 canvas_width, canvas_height;
     u32 decbuf_size;
-    //u32 total_size;
+    u32 total_size;
     char* buf_start;
     int buf_size;
 #ifdef INTERLACE_DROP_MODE
@@ -2417,7 +2465,9 @@ int ppmgr_buffer_init(int vout_mode)
 		display_mode_change = VF_POOL_SIZE;
 		canvas_width = ppmgr_device.canvas_width;
 		canvas_height = ppmgr_device.canvas_height;
-		if (ppmgr_device.receiver_format == (GE2D_FORMAT_M24_NV21|GE2D_LITTLE_ENDIAN)) {
+		if ((ppmgr_device.receiver_format == (GE2D_FORMAT_M24_NV21|GE2D_LITTLE_ENDIAN)) ||
+					(ppmgr_device.receiver_format == (GE2D_FORMAT_M24_NV12|GE2D_LITTLE_ENDIAN))) {
+
             decbuf_size = (canvas_width * canvas_height * 12)>>3;
             decbuf_size = PAGE_ALIGN(decbuf_size);
 			for (i = 0; i < VF_POOL_SIZE; i++) {

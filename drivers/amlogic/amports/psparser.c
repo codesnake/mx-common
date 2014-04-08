@@ -217,7 +217,7 @@ static u32 parser_process(s32 type, s32 packet_len)
             misc_flags = PARSER_POP;
             header_len--;
 
-            if (misc_flags & 0x80) {
+            if ((misc_flags & 0x80) && (header_len >= 128)){
                 /* PES_private_data_flag */
                 for (i = 0; i < 128; i++) {
                     PARSER_POP;

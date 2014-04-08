@@ -15,9 +15,11 @@ meson-arch := m3
 endif
 ifeq ($(CONFIG_ARCH_MESON6),y)
 meson-arch := m6
+avs-meson-arch := m6
 endif
 ifeq ($(CONFIG_ARCH_MESON6TV),y)
-meson-arch := m6
+meson-arch := m6tv
+avs-meson-arch := m6c
 endif
 
 obj-$(CONFIG_AM_STREAMING) += amports.o
@@ -49,6 +51,11 @@ amvdec_mpeg4-y    := vmpeg4.o ${meson-arch}/ucode/mpeg4/vmpeg4_mc.o
 obj-$(CONFIG_AM_VDEC_VC1) += amvdec_vc1.o
 amvdec_vc1-objs := vvc1.o ${meson-arch}/ucode/vc1/vc1_mc.o
 amvdec_vc1-y    := vvc1.o ${meson-arch}/ucode/vc1/vc1_mc.o
+
+
+obj-$(CONFIG_AM_VDEC_AVS) += amvdec_avs.o
+amvdec_avs-objs := vavs.o ${avs-meson-arch}/ucode/avs/vavs_mc.o
+amvdec_avs-y    := vavs.o ${avs-meson-arch}/ucode/avs/vavs_mc.o
 
 obj-$(CONFIG_AM_VDEC_H264) += amvdec_h264.o
 amvdec_h264-objs := vh264.o ${meson-arch}/ucode/h264/vh264_mc.o
@@ -86,6 +93,8 @@ amtsync-y    := tsync.o timestamp.o
 obj-$(CONFIG_AM_PTSSERVER) += ptsserv.o
 
 obj-$(CONFIG_AM_SUBTITLE) += subtitle.o
+
+obj-$(CONFIG_VSYNC_RDMA) += rdma.o
 
 ifneq ($(CONFIG_AM_DVB),)
 EXTRA_CFLAGS = -DENABLE_DEMUX_DRIVER -DMODIFY_TIMESTAMP_INC_WITH_PLL -DCALC_CACHED_TIME #-DUSE_VMASTER_MODE

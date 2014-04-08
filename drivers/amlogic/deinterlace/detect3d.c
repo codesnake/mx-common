@@ -1,6 +1,6 @@
 /* Standard Linux headers */
 #include <linux/kernel.h>
-
+#include <linux/module.h>
 /* Amlogic Headers */
 #include <mach/am_regs.h>
 
@@ -35,10 +35,13 @@
 #define LR_SYMMETRY_LOWER_LIMIT			44	//if > this limit,input is translational-symmety in left half and right half 
 #define TB_SYMMETRY_LOWER_LIMIT			44	//if > this limit,input is translational-symmety in top half and bottom half
 
+static int chessbd_vrate = 29;
+static bool det3d_debug = 0;
+
 /***************************Local variables **********************************/
 const unsigned int det3d_table[DET3D_REG_NUM] = 
 {
-	0x00000002,0x00000011,0x00000065,0x00444400,
+	0x00000002,0x00000027,0x00000065,0x00444400,
 	0xc8404733,0x00060606,0x00060606,0x0000002a,
 	0x0c0c0c0a
 };
@@ -84,6 +87,7 @@ void det3d_enable(bool flag)
 		WRITE_CBUS_REG_BITS(DET3D_MOTN_CFG, 0, DET3D_INTR_EN_BIT, DET3D_INTR_EN_WID);
 		//disable 3D detection
 		WRITE_CBUS_REG_BITS(NR2_SW_EN, 0, DET3D_EN_BIT, DET3D_EN_WID);
+		memset(&det3d_info,0,sizeof(det3d_info));
 	}
 }
 
@@ -149,12 +153,12 @@ static void det3d_accumulate_score(int lr_score, int tb_score, int int_score, in
 		det3d_info.score_3d_lr = (det3d_info.score_3d_lr < LR_FMT_SCORE_MIN) ? -1800: det3d_info.score_3d_lr;
 		det3d_info.score_3d_tb = (det3d_info.score_3d_tb > TB_FMT_SCORE_MAX) ? 1800: det3d_info.score_3d_tb; 
 		det3d_info.score_3d_tb = (det3d_info.score_3d_tb < TB_FMT_SCORE_MIN) ? -1800: det3d_info.score_3d_tb;
-
+		
 		//-------------------------------------
 		// Chessboard frame to frame agreement
 		//-------------------------------------
 		det3d_info.score_3d_chs    = ((chessbd_score == det3d_info.chs_valid_his[0]))? det3d_info.score_3d_chs: 0;  
-		det3d_info.score_3d_int    = ((int_score == det3d_info.int_valid_his[0]))? det3d_info.score_3d_int: 0;            
+		//det3d_info.score_3d_int    = ((int_score == det3d_info.int_valid_his[0]))? det3d_info.score_3d_int: 0;            
 		det3d_info.chs_valid_his[0]= chessbd_score; 
 		det3d_info.int_valid_his[0]= int_score;  
 
@@ -165,7 +169,9 @@ static void det3d_accumulate_score(int lr_score, int tb_score, int int_score, in
 		}        
 		det3d_info.score_3d_chs = det3d_info.score_3d_chs + tmp1;
 		det3d_info.score_3d_int = det3d_info.score_3d_int + tmp2;
-
+		if(det3d_debug)
+			pr_info("%s input(%d,%d),output (%d,%d).\n",__func__,chessbd_score,int_score,
+					det3d_info.score_3d_chs,det3d_info.score_3d_int);
 		// cliping to s7
 		det3d_info.score_3d_chs = (det3d_info.score_3d_chs > CHESSBOAD_FMT_SCORE_MAX) ? CHESSBOAD_FMT_SCORE_MAX : det3d_info.score_3d_chs;
 		det3d_info.score_3d_chs = (det3d_info.score_3d_chs < CHESSBOAD_FMT_SCORE_MIN) ? CHESSBOAD_FMT_SCORE_MIN : det3d_info.score_3d_chs;
@@ -183,7 +189,7 @@ enum det3d_fmt_e det3d_fmt_detect(void)
 {
 	//FW registers
 	int chessbd_hor_rate = 31;// 8bits: norm to 16
-	int chessbd_ver_rate = 31;// 8bits: norm to 16
+	//int chessbd_ver_rate = 31;// 8bits: norm to 16
 	int chessbd_hor_thrd = 4; // 8bits: 
 	int chessbd_ver_thrd = 4; // 8bits: 
 
@@ -272,14 +278,14 @@ enum det3d_fmt_e det3d_fmt_detect(void)
 	chessbd_hor_valid = tmp1 > (((tmp2 * chessbd_hor_rate) >> 4) + chessbd_hor_thrd);
 
 	tmp1 = READ_CBUS_REG_BITS(DET3D_RO_DET_CB_VER, DET3D_CHESSBD_VER_VALUE_BIT, DET3D_CHESSBD_VER_VALUE_WID);
-	tmp2 = READ_CBUS_REG_BITS(DET3D_RO_DET_CB_VER, DET3D_CHESSBD_NVER_VALUE_BIT, DET3D_CHESSBD_NVER_VALUE_WID);
-	chessbd_ver_valid = tmp1 > (((tmp2 * chessbd_ver_rate) >> 4) + chessbd_ver_thrd);  
+	tmp2 = READ_CBUS_REG_BITS(DET3D_RO_DET_CB_VER, DET3D_CHESSBD_NVER_VALUE_BIT, DET3D_CHESSBD_NVER_VALUE_WID);	
+	chessbd_ver_valid = tmp1 > (((tmp2 * chessbd_vrate) >> 4) + chessbd_ver_thrd);  
 
 	tmp_chs = chessbd_hor_valid & chessbd_ver_valid;
 	tmp_chs = 2 * tmp_chs - 1;
 	tmp_int = (chessbd_hor_valid==0) & chessbd_ver_valid;
 	tmp_int = 2 * tmp_int - 1;
-
+	
 	det3d_accumulate_score(tmp_lr, tmp_tb, tmp_int, tmp_chs);
 
 	// quick reset to get faster converse
@@ -321,4 +327,8 @@ enum det3d_fmt_e det3d_fmt_detect(void)
 	return det3d_info.tfw_det3d_fmt;
 }
 
+module_param(chessbd_vrate,int,0644);
+MODULE_PARM_DESC(chessbd_vrate,"\n the chessboard 3d fmt vertical rate \n");
+module_param(det3d_debug,bool,0644);
+MODULE_PARM_DESC(det3d_debug,"\n print the information of 3d detection \n");
 #endif

@@ -39,6 +39,7 @@
 #define VFRAME_EVENT_PROVIDER_LIGHT_UNREG_RETURN_VFRAME   9
 #define VFRAME_EVENT_PROVIDER_DPBUF_CONFIG              10
 #define VFRAME_EVENT_PROVIDER_QUREY_VDIN2NR         11
+#define VFRAME_EVENT_PROVIDER_SET_3D_VFRAME_INTERLEAVE         12
 
 typedef enum {
   RECEIVER_STATE_NULL = -1,
@@ -70,6 +71,8 @@ extern void vf_unreg_receiver(struct vframe_receiver_s *recv);
 struct vframe_receiver_s * vf_get_receiver(const char *provider_name);
 
 int vf_notify_receiver(const char* provider_name, int event_type, void* data);
+
+int vf_notify_receiver_by_name(const char* receiver_name, int event_type, void* data);
 
 
 #endif /* VFRAME_RECEIVER_H */

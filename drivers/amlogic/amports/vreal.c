@@ -70,6 +70,7 @@
 #define FROM_AMRISC     AV_SCRATCH_8
 #define TO_AMRISC       AV_SCRATCH_9
 #define SKIP_B_AMRISC   AV_SCRATCH_A
+#define WAIT_BUFFER     AV_SCRATCH_E
 
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6  
 #define MDEC_WIDTH      AV_SCRATCH_I
@@ -152,6 +153,7 @@ static u32 real_recycle_rd;
 static u32 real_recycle_wr;
 
 static u32 fatal_flag;
+static s32 wait_buffer_counter = 0;
 
 static DEFINE_SPINLOCK(lock);
 
@@ -341,7 +343,7 @@ static void vreal_isr(void)
         vf->orientation = 0 ;
         vfpool_idx[fill_ptr] = buffer_index;
 
-        vfbuf_use[buffer_index]++;
+        vfbuf_use[buffer_index] = 1;
 
         INCPTR(fill_ptr);
 
@@ -385,6 +387,10 @@ static vframe_t *vreal_vf_get(void* op_arg)
 
 static void vreal_vf_put(vframe_t *vf, void* op_arg)
 {
+    if (vf->index >= VF_BUF_NUM) {
+        return;
+    }
+
     INCPTR(putting_ptr);
 }
 
@@ -431,6 +437,17 @@ static int  vreal_vf_states(vframe_states_t *states, void* op_arg)
     return 0;
 }
 
+#ifdef CONFIG_POST_PROCESS_MANAGER
+static void vreal_ppmgr_reset(void)
+{
+    vf_notify_receiver(PROVIDER_NAME,VFRAME_EVENT_PROVIDER_RESET,NULL);
+
+    vreal_local_init();
+
+    printk("vrealdec: vf_ppmgr_reset\n");
+}
+#endif
+
 static void vreal_put_timer_func(unsigned long arg)
 {
     struct timer_list *timer = (struct timer_list *)arg;
@@ -438,6 +455,40 @@ static void vreal_put_timer_func(unsigned long arg)
 
 #ifndef HANDLE_REAL_IRQ
     vreal_isr();
+#endif
+
+#if 0
+    receviver_start_e state = RECEIVER_INACTIVE ;
+    if (vf_get_receiver(PROVIDER_NAME)){
+        state = vf_notify_receiver(PROVIDER_NAME,VFRAME_EVENT_PROVIDER_QUREY_STATE,NULL);
+        if((state == RECEIVER_STATE_NULL)||(state == RECEIVER_STATE_NONE)){
+            /* receiver has no event_cb or receiver's event_cb does not process this event */
+            state  = RECEIVER_INACTIVE ;
+        }
+    }else{
+         state  = RECEIVER_INACTIVE ;
+    }
+
+    if ((READ_VREG(WAIT_BUFFER) != 0) &&
+        (get_ptr == fill_ptr) &&
+        (putting_ptr == put_ptr) &&
+        (real_recycle_rd == real_recycle_wr) && 
+        (state == RECEIVER_INACTIVE)) {
+        printk("$$$$$$decoder is waiting for buffer\n");
+        if (++wait_buffer_counter > 2) {
+            amvdec_stop();
+
+#ifdef CONFIG_POST_PROCESS_MANAGER
+            vreal_ppmgr_reset();
+#else
+            vf_light_unreg_provider(&vreal_vf_prov);
+            vreal_local_init();
+            vf_reg_provider(&vreal_vf_prov);
+#endif
+            vreal_prot_init();
+            amvdec_start();
+        }
+    }
 #endif
 
     if (putting_ptr != put_ptr) {
@@ -628,6 +679,9 @@ static void vreal_prot_init(void)
     /* enable mailbox interrupt */
     WRITE_VREG(ASSIST_MBOX1_MASK, 1);
 
+    /* clear wait buffer status */
+    WRITE_VREG(WAIT_BUFFER, 0);
+
 #ifdef NV21
     SET_VREG_MASK(MDEC_PIC_DC_CTRL, 1<<17);
 #endif
@@ -652,6 +706,10 @@ static void vreal_local_init(void)
         vfbuf_use[i] = 0;
     }
 
+    for (i = 0; i < VF_POOL_SIZE; i++) {
+        vfpool_idx[i] = VF_BUF_NUM;
+    }
+
     decoder_state = 1;
     hold = 0;
     last_tr = -1;
@@ -666,6 +724,7 @@ static void vreal_local_init(void)
     pic_sz_tbl_map = 0;
 
     fatal_flag = 0;
+    wait_buffer_counter = 0;
 }
 
 static void load_block_data(unsigned int dest, unsigned int count)

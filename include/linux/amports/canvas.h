@@ -46,9 +46,6 @@ typedef struct {
 #define AMVDEC_H264_CANVAS_INDEX 0x80
 #define AMVDEC_H264_CANVAS_MAX 0xbf
 
-// tvin vdin0: 0xc-0x23   vdin1: 0x24-0x3b
-#define VDIN_CANVAS_INDEX   0xC
-#define VDIN_CANVAS_MAX_INDEX 0x3B
 
 //tvin camera  vdin0: 0x18-0x1d   vdin1: 0x1e-0x23, nv21 chroma: 0x24-0x2f
 #define VDIN_CAMERA_CANVAS_INDEX   0x18
@@ -73,8 +70,16 @@ typedef struct {
 #define DISPLAY_CANVAS_BASE_INDEX   0x60
 #define DISPLAY_CANVAS_MAX_INDEX    0x65
 
-#define DISPLAY2_CANVAS_BASE_INDEX   0x66
-#define DISPLAY2_CANVAS_MAX_INDEX    0x6b
+/*do not define both CONFIG_VSYNC_RDMA and CONFIG_AM_VIDEO2 */
+#ifdef CONFIG_VSYNC_RDMA
+#define DISPLAY_CANVAS_BASE_INDEX2   0x10
+#define DISPLAY_CANVAS_MAX_INDEX2    0x15
+#endif
+
+#ifdef CONFIG_AM_VIDEO2
+#define DISPLAY2_CANVAS_BASE_INDEX   0x1a
+#define DISPLAY2_CANVAS_MAX_INDEX    0x1f
+#endif
 
 /*here ppmgr share the same canvas with deinterlace and mipi driver for m6*/
 #define PPMGR_CANVAS_INDEX 0x70
@@ -94,17 +99,37 @@ typedef struct {
 #define DI_CONTP2RD_CANVAS_IDX           0x75
 #define DI_CONTWR_CANVAS_IDX            0x76
 //DI POST, share with DISPLAY
-#define DI_POST_BUF0_CANVAS_IDX         0x60
-#define DI_POST_BUF1_CANVAS_IDX         0x61
-#define DI_POST_MTNCRD_CANVAS_IDX       0x62
-#define DI_POST_MTNPRD_CANVAS_IDX       0x63
+#define DI_POST_BUF0_CANVAS_IDX         0x66
+#define DI_POST_BUF1_CANVAS_IDX         0x67
+#define DI_POST_MTNCRD_CANVAS_IDX       0x68
+#define DI_POST_MTNPRD_CANVAS_IDX       0x69
+
+#ifdef CONFIG_VSYNC_RDMA
+#define DI_POST_BUF0_CANVAS_IDX2         0x6a
+#define DI_POST_BUF1_CANVAS_IDX2         0x6b
+#define DI_POST_MTNCRD_CANVAS_IDX2       0x6c
+#define DI_POST_MTNPRD_CANVAS_IDX2       0x6d
+#endif
+
 #else
 #define DEINTERLACE_CANVAS_BASE_INDEX	0x70
 #define DEINTERLACE_CANVAS_MAX_INDEX	0x7f
 #endif
 
+#define DISPLAY_CANVAS_YDUP_INDEX 0x50
+#define DISPLAY_CANVAS_UDUP_INDEX 0x51
+
+
 #define MIPI_CANVAS_INDEX 0x70
 #define MIPI_CANVAS_MAX_INDEX 0x7f
+
+//tvin vdin0: 0x80-0x97 share with h264 decoder only for tvin&camera
+#define VDIN0_CANVAS_INDEX              0x80
+#define VDIN0_CANVAS_MAX_INDEX          0x97
+//tvin vdin1: 0x24-0x3b
+#define VDIN1_CANVAS_INDEX              0x24
+#define VDIN1_CANVAS_MAX_INDEX          0x3B
+
 
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TV
 #define AMLVIDEO2_RES_CANVAS 0xD8
@@ -145,5 +170,6 @@ extern unsigned int canvas_get_addr(u32 index);
 #define CANVAS_BLKMODE_64X32    0x02
 
 #endif
+
 
 #endif /* CANVAS_H */

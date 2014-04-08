@@ -44,6 +44,7 @@
 #include "tvmode.h"
 #include "vout_log.h"
 #include <linux/amlog.h>
+#include <linux/amports/vframe.h>
 #ifdef CONFIG_HAS_EARLYSUSPEND
 #include <linux/earlysuspend.h>
 static struct early_suspend early_suspend;
@@ -143,11 +144,13 @@ static  void  set_vout_mode(char * name)
 		amlog_mask_level(LOG_MASK_PARA,LOG_LEVEL_HIGH,"don't set the same mode as current.\r\n");	
 		return ;
 	}
+  pause_video(1);
 #ifdef CONFIG_AML_HDMI_TX
-	if(mode < VMODE_LCD)
+	if((mode <= VMODE_1080P_24HZ) && (mode != VMODE_480CVBS) && (mode != VMODE_576CVBS))
 		hdmi_pre_set_change_mode();
 #endif
 	set_current_vmode(mode);
+  pause_video(0);
 	amlog_mask_level(LOG_MASK_PARA,LOG_LEVEL_HIGH,"new mode %s set ok\r\n",name);
 	vout_notifier_call_chain(VOUT_EVENT_MODE_CHANGE,&mode) ;
 	printk("%s[%d]\n", __func__, __LINE__);

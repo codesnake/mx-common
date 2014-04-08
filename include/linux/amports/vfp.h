@@ -54,20 +54,34 @@ static inline bool vfq_empty(vfq_t *q)
 
 static inline void vfq_push(vfq_t *q, vframe_t *vf)
 {
-    q->pool[q->wp] = vf;
-    q->wp = (q->wp == (q->size-1)) ? 0 : (q->wp+1);
+    int wp = q->wp;
+
+    smp_mb();
+
+    q->pool[wp] = vf;
+
+    smp_wmb();
+
+    q->wp = (wp == (q->size-1)) ? 0 : (wp+1);
 }
 
 static inline vframe_t *vfq_pop(vfq_t *q)
 {
     vframe_t *vf;
+    int rp;
 
     if (vfq_empty(q))
         return NULL;
 
-    vf = q->pool[q->rp];
+    rp = q->rp;
 
-    q->rp = (q->rp == (q->size-1)) ? 0 : (q->rp+1);
+    smp_rmb();
+
+    vf = q->pool[rp];
+
+    smp_mb();
+
+    q->rp = (rp == (q->size-1)) ? 0 : (rp+1);
 
     return vf;
 }

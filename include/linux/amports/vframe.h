@@ -23,11 +23,7 @@
 #define VFRAME_H
 
 #include <linux/types.h>
-#ifdef CONFIG_ARCH_MESON6TV
 #include <linux/tvin/tvin.h>
-#else
-#include <media/amlogic/656in.h>
-#endif
 
 #define VIDTYPE_PROGRESSIVE             0x0
 #define VIDTYPE_INTERLACE_TOP           0x1
@@ -132,6 +128,7 @@ typedef enum vframe_source_type_e {
         VFRAME_SOURCE_TYPE_TUNER,
         VFRAME_SOURCE_TYPE_CVBS,
         VFRAME_SOURCE_TYPE_COMP,
+        VFRAME_SOURCE_TYPE_HDMI,
         VFRAME_SOURCE_TYPE_PPMGR,
         VFRAME_SOURCE_TYPE_OSD,
 } vframe_source_type_t;
@@ -170,17 +167,15 @@ typedef struct vframe_s {
         enum vframe_source_mode_e source_mode;
         tvin_sig_fmt_t sig_fmt;
 
-#ifdef CONFIG_POST_PROCESS_MANAGER_3D_PROCESS
         enum tvin_trans_fmt  trans_fmt;
         struct vframe_view_s left_eye;
         struct vframe_view_s right_eye;
-#endif
         u32   mode_3d_enable ;
 
         /* vframe extension */
-        int (*early_process_fun)(void* arg);
+        int (*early_process_fun)(void* arg, struct vframe_s* vf);
         int (*process_fun)(void* arg, unsigned zoom_start_x_lines,
-                        unsigned zoom_end_x_lines, unsigned zoom_start_y_lines, unsigned zoom_end_y_lines);
+                        unsigned zoom_end_x_lines, unsigned zoom_start_y_lines, unsigned zoom_end_y_lines, struct vframe_s* vf);
         void* private_data;
 #if 1
         /* vframe properties */
@@ -197,7 +192,20 @@ struct vframe_prop_s * vdin_get_vframe_prop(u32 index);
 #endif
 int get_curren_frame_para(int* top ,int* left , int* bottom, int* right);
 
+
+#ifdef CONFIG_VSYNC_RDMA
+int VSYNC_WR_MPEG_REG(unsigned long adr, unsigned long val);
+int VSYNC_WR_MPEG_REG_BITS(unsigned long adr, unsigned long val, unsigned long start, unsigned long len);
+
+unsigned long VSYNC_RD_MPEG_REG(unsigned long adr);
+#else
+#define VSYNC_WR_MPEG_REG(adr,val) WRITE_MPEG_REG(adr, val)
+#define VSYNC_WR_MPEG_REG_BITS(adr, val, start, len)  WRITE_MPEG_REG_BITS(adr, val, start, len)
+#define VSYNC_RD_MPEG_REG(adr) READ_MPEG_REG(adr)
+#endif
+
 u8 is_vpp_postblend(void);
 
+void pause_video(unsigned char);
 #endif /* VFRAME_H */
 

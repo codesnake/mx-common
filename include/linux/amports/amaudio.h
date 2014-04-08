@@ -74,9 +74,10 @@
 #define AMAUDIO_IOC_GET_RESAMPLE_ENA        _IOR(AMAUDIO_IOC_MAGIC, 0x1a, unsigned long)
 #define AMAUDIO_IOC_SET_RESAMPLE_TYPE       _IOW(AMAUDIO_IOC_MAGIC, 0x1b, unsigned long)
 #define AMAUDIO_IOC_GET_RESAMPLE_TYPE       _IOR(AMAUDIO_IOC_MAGIC, 0x1c, unsigned long)
+#define AMAUDIO_IOC_SET_RESAMPLE_DELTA      _IOW(AMAUDIO_IOC_MAGIC, 0x1d, unsigned long)
+#define AMAUDIO_IOC_GET_RESAMPLE_DELTA      _IOW(AMAUDIO_IOC_MAGIC, 0x1e, unsigned long)
 
-	
-
+#define AMAUDIO_IOC_GET_PLAYBACK_SR      _IOW(AMAUDIO_IOC_MAGIC, 0x1f, int)
 
 
 #define DIRECT_AUDIO_OFF	0

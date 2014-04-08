@@ -224,6 +224,16 @@ void osddev_get_flush_rate(u32 *flush_rate)
 	osd_get_flush_rate(flush_rate);
 }
 
+void osddev_get_update_state(u32 index, u32 *up_free)
+{
+	osd_get_osd_updatestate_hw(index, up_free);
+}
+
+void osddev_set_update_state(u32 index, u32 up_free)
+{
+	osd_set_osd_updatestate_hw(index, up_free);
+}
+
 void osddev_get_osd_reverse(u32 index, u32 *reverse)
 {
 	osd_get_osd_reverse_hw(index, reverse);

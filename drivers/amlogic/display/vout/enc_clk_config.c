@@ -45,6 +45,10 @@ static void set_hpll_clk_out(unsigned clk)
         default:
             break;
     }
+#ifdef CONFIG_ARCH_MESON6TV
+    WRITE_CBUS_REG(HHI_VID_PLL_CNTL, READ_CBUS_REG(HHI_VID_PLL_CNTL) | (1 << 30));      // bit[30]: 1: Power Up, 0: Power Down, different from M6
+#endif
+
 }
 
 static void set_hpll_hdmi_od(unsigned div)

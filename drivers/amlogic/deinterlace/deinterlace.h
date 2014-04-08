@@ -1,12 +1,19 @@
 #ifndef _DI_H
 #define _DI_H
 
+#ifndef MESON_CPU_TYPE_MESON8
+#define MESON_CPU_TYPE_MESON8 (MESON_CPU_TYPE_MESON6TV+1)
+#endif
+
 #undef USE_LIST
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
 #define NEW_KEEP_LAST_FRAME
 #endif
 
 #if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TV
+#ifndef CONFIG_POST_PROCESS_MANAGER_3D_PROCESS
+#define CONFIG_POST_PROCESS_MANAGER_3D_PROCESS
+#endif
 #define D2D3_SUPPORT
 #define NEW_DI
 #ifdef CONFIG_POST_PROCESS_MANAGER_3D_PROCESS
@@ -14,12 +21,37 @@
 #endif
 #endif
 
+#if MESON_CPU_TYPE > MESON_CPU_TYPE_MESON6TV
+#define NEW_DI
+#define CONFIG_MESON_M6C_ENHANCEMENT
+#endif
+
 #ifndef CONFIG_VSYNC_RDMA
 #ifndef VSYNC_WR_MPEG_REG
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#define VSYNC_WR_MPEG_REG(adr,val) WRITE_VCBUS_REG(adr, val)
+#define VSYNC_WR_MPEG_REG_BITS(adr, val, start, len)  WRITE_VCBUS_REG_BITS(adr, val, start, len)
+#define VSYNC_RD_MPEG_REG(adr) READ_VCBUS_REG(adr)
+#else
 #define VSYNC_WR_MPEG_REG(adr,val) WRITE_MPEG_REG(adr, val)
 #define VSYNC_WR_MPEG_REG_BITS(adr, val, start, len)  WRITE_MPEG_REG_BITS(adr, val, start, len)
+#define VSYNC_RD_MPEG_REG(adr) READ_MPEG_REG(adr)
 #endif
 #endif
+#endif
+
+
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#define Wr(adr, val) WRITE_VCBUS_REG(adr, val)
+#define Rd(adr) READ_VCBUS_REG(adr)
+//#define Wr_reg_bits(reg, val, start, len) WRITE_VCBUS_REG_BITS(adr, val, start, len)
+#else
+#define Wr(adr, val) WRITE_MPEG_REG(adr, val)
+#define Rd(adr) READ_MPEG_REG(adr)
+//#define Wr_reg_bits(reg, val, start, len) WRITE_MPEG_REG_BITS(adr, val, start, len)
+#endif
+#define Wr_reg_bits(reg, val, start, len) \
+  Wr(reg, (Rd(reg) & ~(((1L<<(len))-1)<<(start)))|((unsigned int)(val) << (start)))
 
 
 /************************************
@@ -84,6 +116,14 @@ typedef struct{
     uint pixels_num;
 }pd_win_prop_t;
 
+typedef enum {
+    PROCESS_FUN_NULL = 0,
+    PROCESS_FUN_DI,
+    PROCESS_FUN_PD,
+    PROCESS_FUN_PROG,
+    PROCESS_FUN_BOB
+}process_fun_index_t;
+
 typedef struct di_buf_s{
 #ifdef D2D3_SUPPORT
     unsigned int dp_buf_adr;
@@ -98,6 +138,8 @@ typedef struct di_buf_s{
     int post_proc_flag; /* 0,no post di; 1, normal post di; 2, edge only; 3, dummy */
     int new_format_flag;
     int type;
+    int throw_flag;
+    int invert_top_bot_flag;
     int seq;
     int pre_ref_count; /* none zero, is used by mem_mif, chan2_mif, or wr_buf*/
     int post_ref_count; /* none zero, is used by post process */
@@ -120,7 +162,9 @@ typedef struct di_buf_s{
 	  unsigned long mtn_info[5];
     int pulldown_mode;
     int win_pd_mode[5];
-
+    process_fun_index_t process_fun_index;
+    int early_process_fun_index;
+  	int left_right;/*1,left eye; 0,right eye in field alternative*/
     /*below for type of VFRAME_TYPE_POST*/
     struct di_buf_s* di_buf[2];
     struct di_buf_s* di_buf_dup_p[5]; /* 0~4: n-2, n-1, n, n+1, n+2 ; n is the field to display*/
@@ -183,7 +227,6 @@ extern pd_detect_threshold_t win_pd_th[MAX_WIN_NUM];
 extern pd_win_prop_t pd_win_prop[MAX_WIN_NUM];
 
 extern int  pd_enable;
-extern bool overturn;
 
 extern void di_hw_init(void);
 
@@ -294,7 +337,7 @@ void enable_di_post_2 (
    DI_SIM_MIF_t    *di_mtncrd_mif,
    DI_SIM_MIF_t    *di_mtnprd_mif,
    int ei_en, int blend_en, int blend_mtn_en, int blend_mode, int di_vpp_en, int di_ddr_en,
-   int post_field_num, int hold_line ,
+   int post_field_num, int hold_line , int urgent,
    unsigned long * reg_mtn_info);
 
 void di_post_switch_buffer (
@@ -304,7 +347,7 @@ void di_post_switch_buffer (
    DI_SIM_MIF_t    *di_mtncrd_mif,
    DI_SIM_MIF_t    *di_mtnprd_mif,
    int ei_en, int blend_en, int blend_mtn_en, int blend_mode, int di_vpp_en, int di_ddr_en,
-   int post_field_num, int hold_line,
+   int post_field_num, int hold_line, int urgent,
    unsigned long * reg_mtn_info );
 
 void enable_di_post_pd(
@@ -314,7 +357,7 @@ void enable_di_post_pd(
     DI_SIM_MIF_t    *di_mtncrd_mif,
     DI_SIM_MIF_t    *di_mtnprd_mif,
     int ei_en, int blend_en, int blend_mtn_en, int blend_mode, int di_vpp_en, int di_ddr_en,
-    int post_field_num, int hold_line);
+    int post_field_num, int hold_line, int urgent);
 
 void di_post_switch_buffer_pd(
     DI_MIF_t        *di_buf0_mif,
@@ -323,7 +366,7 @@ void di_post_switch_buffer_pd(
     DI_SIM_MIF_t    *di_mtncrd_mif,
     DI_SIM_MIF_t    *di_mtnprd_mif,
     int ei_en, int blend_en, int blend_mtn_en, int blend_mode, int di_vpp_en, int di_ddr_en,
-    int post_field_num, int hold_line);
+    int post_field_num, int hold_line, int urgent);
 
 void read_pulldown_info(pulldown_detect_info_t* field_pd_info, 
                         pulldown_detect_info_t* win_pd_info);
@@ -339,6 +382,9 @@ void pattern_check_pre_2(int idx, pulldown_detect_info_t* cur_info, pulldown_det
                     pd_detect_threshold_t* pd_th);
 
 void reset_di_para(void);
+/* for video reverse */
+void di_post_read_reverse(bool reverse);
+void di_post_read_reverse_irq(bool reverse);
 
 /* new pd algorithm */
 void reset_pd_his(void);
@@ -384,5 +430,7 @@ typedef struct reg_cfg_{
     unsigned short sig_fmt_range[FMT_MAX_NUM]; /* {bit[31:16]~bit[15:0]}, include bit[31:16] and bit[15:0]  */
     reg_set_t reg_set[REG_SET_MAX_NUM];    
 }reg_cfg_t;
+
+int get_current_vscale_skip_count(vframe_t* vf);
 
 #endif

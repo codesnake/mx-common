@@ -10,7 +10,7 @@
 
 #include "vdec_reg.h"
 
-#define VIDEO_REC_SIZE  4096
+#define VIDEO_REC_SIZE  5120
 #define AUDIO_REC_SIZE  8192
 #define VIDEO_LOOKUP_RESOLUTION 2500
 #define AUDIO_LOOKUP_RESOLUTION 1024
@@ -358,6 +358,60 @@ int pts_checkin(u8 type, u32 val)
 }
 
 EXPORT_SYMBOL(pts_checkin);
+/**
+ * The last checkin pts means the position in the stream.
+ */
+int get_last_checkin_pts(u8 type)
+{
+  pts_table_t* pTable = NULL;
+  u32 last_checkin_pts = 0;
+  ulong flags;
+
+  spin_lock_irqsave(&lock, flags);
+
+  if(type == PTS_TYPE_VIDEO){
+    pTable = &pts_table[PTS_TYPE_VIDEO];
+    last_checkin_pts =  pTable->last_checkin_pts;
+  }else if(type == PTS_TYPE_AUDIO){
+    pTable = &pts_table[PTS_TYPE_AUDIO];
+    last_checkin_pts = pTable->last_checkin_pts;
+  }else{
+    spin_unlock_irqrestore(&lock, flags);
+    return -EINVAL;
+  }
+
+  spin_unlock_irqrestore(&lock, flags);
+  return last_checkin_pts;
+}
+
+EXPORT_SYMBOL(get_last_checkin_pts);
+
+/**
+ *
+ */
+
+int get_last_checkout_pts(u8 type)
+{
+  pts_table_t * pTable = NULL;
+  u32 last_checkout_pts = 0;
+  ulong flags;
+  spin_lock_irqsave(&lock, flags);
+  if(type == PTS_TYPE_VIDEO){
+    pTable = &pts_table[PTS_TYPE_VIDEO];
+    last_checkout_pts = pTable->last_checkout_pts;
+  }else if(type == PTS_TYPE_AUDIO){
+    pTable = &pts_table[PTS_TYPE_AUDIO];
+    last_checkout_pts = pTable->last_checkout_pts;
+  }else{
+    spin_unlock_irqrestore(&lock, flags);
+    return -EINVAL;
+  }
+
+  spin_unlock_irqrestore(&lock, flags);
+  return last_checkout_pts;
+}
+
+EXPORT_SYMBOL(get_last_checkout_pts);
 
 int pts_lookup(u8 type, u32 *val, u32 pts_margin)
 {

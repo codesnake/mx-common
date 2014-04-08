@@ -69,7 +69,10 @@ dsp_register.h
 #define DSP_LOG_WD_ADDR  		DSP_REG(31)
 
 #define DSP_CHIP_SUBID          DSP_REG(32)
+// other definations
 
+// for wifi-display 
+#define DSP_SKIP_BYTES          DSP_REG(38)
 
 #define MAILBOX1_REG(n)	DSP_REG(40+n)
 #define MAILBOX2_REG(n)	DSP_REG(40+32+n)

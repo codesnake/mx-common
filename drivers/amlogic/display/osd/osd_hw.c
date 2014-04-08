@@ -452,6 +452,13 @@ void osddev_update_disp_axis_hw(
 	//if output mode change then reset pan ofFfset.
 	memcpy(&osd_hw.pandata[index],&pan_data,sizeof(pandata_t));
 	memcpy(&osd_hw.dispdata[index],&disp_data,sizeof(dispdata_t));
+
+#if defined(CONFIG_FB_OSD2_CURSOR)
+	if(index == OSD2) {
+	    osd_hw.enable[OSD2]=DISABLE;
+	    add_to_update_list(OSD2,OSD_ENABLE);
+	}
+#endif
 	add_to_update_list(index,DISP_GEOMETRY);
 	osd_wait_vsync_hw();
 
@@ -929,6 +936,24 @@ void osd_set_osd_reverse_hw(u32 index, u32 reverse)
 	osd_hw.osd_reverse[index] = reverse;
 	add_to_update_list(index, DISP_OSD_REVERSE);
 	osd_wait_vsync_hw();
+}
+
+void osd_get_osd_updatestate_hw(u32 index,u32 *up_free)
+{
+	if (osd_vf_need_update){
+		*up_free = 1;
+	}else{
+		*up_free = 0;
+	}
+}
+
+void osd_set_osd_updatestate_hw(u32 index, u32 up_free)
+{
+	if (up_free > 0){
+		osd_vf_need_update = true;
+	}else{
+		osd_vf_need_update = false;
+	}
 }
 
 void osd_get_osd_reverse_hw(u32 index,u32 *reverse)
@@ -1618,14 +1643,21 @@ static void osd1_update_disp_geometry(void)
 		data32 |= (osd_hw.block_mode[OSD1] & HW_OSD_BLOCK_ENABLE_MASK);
 		aml_write_reg32(P_VIU_OSD1_CTRL_STAT, data32);
 	} else {
-		data32 = (osd_hw.dispdata[OSD1].x_start& 0xfff) | (osd_hw.dispdata[OSD1].x_end & 0xfff) <<16 ;
-		aml_write_reg32(P_VIU_OSD1_BLK0_CFG_W3 , data32);
-		if (osd_hw.scan_mode == SCAN_MODE_INTERLACE) {
-			data32 = ((osd_hw.dispdata[OSD1].y_start >> 1) & 0xfff) | ((((osd_hw.dispdata[OSD1].y_end+1) >> 1) - 1) & 0xfff) << 16 ;
-		} else {
-			data32 = (osd_hw.dispdata[OSD1].y_start & 0xfff) | (osd_hw.dispdata[OSD1].y_end & 0xfff) <<16 ;
+		if (osd_hw.free_scale_enable[OSD1] == 1){
+			data32 = (osd_hw.free_scale_data[OSD1].x_start& 0xfff) | (osd_hw.free_scale_data[OSD1].x_end & 0xfff) <<16 ;
+			aml_write_reg32(P_VIU_OSD1_BLK0_CFG_W3 , data32);
+			data32 = (osd_hw.free_scale_data[OSD1].y_start & 0xfff) | (osd_hw.free_scale_data[OSD1].y_end & 0xfff) <<16 ;
+			aml_write_reg32(P_VIU_OSD1_BLK0_CFG_W4, data32);
+		}else{
+			data32 = (osd_hw.dispdata[OSD1].x_start& 0xfff) | (osd_hw.dispdata[OSD1].x_end & 0xfff) <<16 ;
+			aml_write_reg32(P_VIU_OSD1_BLK0_CFG_W3 , data32);
+			if (osd_hw.scan_mode == SCAN_MODE_INTERLACE) {
+				data32 = ((osd_hw.dispdata[OSD1].y_start >> 1) & 0xfff) | ((((osd_hw.dispdata[OSD1].y_end+1) >> 1) - 1) & 0xfff) << 16 ;
+			} else {
+				data32 = (osd_hw.dispdata[OSD1].y_start & 0xfff) | (osd_hw.dispdata[OSD1].y_end & 0xfff) <<16 ;
+			}
+			aml_write_reg32(P_VIU_OSD1_BLK0_CFG_W4, data32);
 		}
-		aml_write_reg32(P_VIU_OSD1_BLK0_CFG_W4, data32);
 
 		/* enable osd 2x scale */
 		if (osd_hw.scale[OSD1].h_enable || osd_hw.scale[OSD1].v_enable) {
@@ -1760,15 +1792,15 @@ void osd_init_hw(u32  logo_loaded)
 	//here we will init default value ,these value only set once .
 #ifdef CONFIG_ARCH_MESON6TV
 	aml_set_reg32_mask(P_VPU_OSD1_MMC_CTRL, 1<<12); // set OSD to vdisp2
+#ifndef CONFIG_MESON_M6C_ENHANCEMENT
 	aml_write_reg32(P_MMC_CHAN4_CTRL, 0xc01f); // adjust vdisp weight and age limit
+#endif
 #endif
 	if(!logo_loaded)
 	{
 		data32 = 1;          // Set DDR request priority to be urgent
 		#ifdef CONFIG_ARCH_MESON6TV
-		aml_set_reg32_mask(VPU_OSD1_MMC_CTRL, 1<<12); // set OSD to vdisp2
-		aml_write_reg32(P_MMC_CHAN4_CTRL, 0xc01f); // adjust vdisp weight and age limit
-		data32 |= 18  << 5;  // hold_fifo_lines
+		data32 |= 26  << 5;  // hold_fifo_lines
 		#else
 		data32 |= 4   << 5;  // hold_fifo_lines
 		#endif
@@ -1815,8 +1847,8 @@ void osd_init_hw(u32  logo_loaded)
 	osd_hw.scale[OSD2].h_enable=osd_hw.scale[OSD2].v_enable=0;
 	osd_hw.mode_3d[OSD2].enable=osd_hw.mode_3d[OSD1].enable=0;
 	osd_hw.block_mode[OSD1] = osd_hw.block_mode[OSD2] = 0;
-	osd_hw.free_scale[OSD1].hfs_enable=osd_hw.free_scale[OSD2].hfs_enable=0;
-	osd_hw.free_scale[OSD1].vfs_enable=osd_hw.free_scale[OSD2].vfs_enable=0;
+	osd_hw.free_scale[OSD1].hfs_enable=osd_hw.free_scale[OSD1].hfs_enable=0;
+	osd_hw.free_scale[OSD2].vfs_enable=osd_hw.free_scale[OSD2].vfs_enable=0;
 	osd_hw.free_scale_mode[OSD1] = osd_hw.free_scale_mode[OSD2] = 0;
 	osd_hw.osd_reverse[OSD1] = osd_hw.osd_reverse[OSD2] = 0;
 
@@ -1848,6 +1880,11 @@ void osd_cursor_hw(s16 x, s16 y, s16 xstart, s16 ystart, u32 osd_w, u32 osd_h, i
 
 	if (index != 1)
 		return;
+
+	if(osd_hw.enable[OSD2] != ENABLE) {
+	    osd_hw.enable[OSD2]=ENABLE;
+	    add_to_update_list(OSD2,OSD_ENABLE);
+	}
 
 	memcpy(&disp_tmp, &osd_hw.dispdata[OSD1], sizeof(dispdata_t));
 	if (osd_hw.scale[OSD2].h_enable && (osd_hw.scaledata[OSD2].x_start > 0)

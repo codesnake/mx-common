@@ -135,6 +135,7 @@ static s32 video_layer_top, video_layer_left, video_layer_width, video_layer_hei
 static u32 video_source_crop_top, video_source_crop_left, video_source_crop_bottom, video_source_crop_right;
 static s32 video_layer_global_offset_x, video_layer_global_offset_y;
 static s32 osd_layer_top,osd_layer_left,osd_layer_width,osd_layer_height;
+static u32 video_speed_check_width=1800, video_speed_check_height=1400;
 
 #define ZOOM_BITS       18
 #define PHASE_BITS      8
@@ -258,7 +259,7 @@ vpp_process_speed_check(u32 width_in,
    		return 1;
    }
    
-    if (1800 * 1400 * height_out > height_screen * width_in * height_in) {
+    if (video_speed_check_width * video_speed_check_height * height_out > height_screen * width_in * height_in) {
         return 0;
     }
 
@@ -766,3 +767,15 @@ u32 vpp_get_zoom_ratio(void)
 {
    return vpp_zoom_ratio;
 }
+void vpp_set_video_speed_check(u32 h, u32 w)
+{
+    video_speed_check_height = h;
+    video_speed_check_width = w;
+}
+
+void vpp_get_video_speed_check(u32 *h, u32 *w)
+{
+    *h = video_speed_check_height;
+    *w = video_speed_check_width;
+}
+

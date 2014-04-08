@@ -67,6 +67,7 @@ MODULE_AMLOG(LOG_LEVEL_ERROR, 0, LOG_LEVEL_DESC, LOG_DEFAULT_MASK_DESC);
 #define MREG_CO_MV_START    AV_SCRATCH_B
 #define MREG_ERROR_COUNT    AV_SCRATCH_C
 #define MREG_FRAME_OFFSET   AV_SCRATCH_D
+#define MREG_WAIT_BUFFER    AV_SCRATCH_E
 
 #define PICINFO_ERROR       0x80000000
 #define PICINFO_TYPE_MASK   0x00030000
@@ -153,6 +154,7 @@ static DEFINE_SPINLOCK(lock);
 /* for error handling */
 static s32 frame_force_skip_flag = 0;
 static s32 error_frame_skip_level = 0;
+static s32 wait_buffer_counter = 0;
 
 static inline u32 index2canvas(u32 index)
 {
@@ -333,7 +335,7 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
             vf->orientation = 0 ;
             vf->pts = (pts_valid) ? pts : 0;
 
-            vfbuf_use[index]++;
+            vfbuf_use[index] = 1;
 
             if (error_skip(info, vf)) {
                 spin_lock_irqsave(&lock, flags);
@@ -346,13 +348,11 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
 
         } else {
             u32 index = ((reg & 7) - 1) & 3;
-
             vf = vfq_pop(&newframe_q);
 
-            vfbuf_use[index] += 2;
+            vfbuf_use[index] = 2;
 
             set_frame_info(vf);
-
             vf->index = index;
             vf->type = (info & PICINFO_TOP_FIRST) ?
                        VIDTYPE_INTERLACE_TOP : VIDTYPE_INTERLACE_BOTTOM;
@@ -379,14 +379,9 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
             set_frame_info(vf);
 
             vf->index = index;
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6
-            /* it is just a patch for display dithering, I do NOT find the root cause */
-            vf->type = (info & PICINFO_TOP_FIRST) ?
-                       VIDTYPE_INTERLACE_TOP : VIDTYPE_INTERLACE_BOTTOM;
-#else
+
             vf->type = (info & PICINFO_TOP_FIRST) ?
                        VIDTYPE_INTERLACE_BOTTOM : VIDTYPE_INTERLACE_TOP;
-#endif
 #ifdef NV21
             vf->type |= VIDTYPE_VIU_NV21;
 #endif
@@ -424,6 +419,10 @@ static vframe_t *vmpeg_vf_get(void* op_arg)
 
 static void vmpeg_vf_put(vframe_t *vf, void* op_arg)
 {
+    if (vf->index >= VF_POOL_SIZE) {
+        return;
+    }
+
     vfq_push(&recycle_q, vf);
 }
 
@@ -459,9 +458,53 @@ static int  vmpeg_vf_states(vframe_states_t *states, void* op_arg)
     return 0;
 }
 
+#ifdef CONFIG_POST_PROCESS_MANAGER
+static void vmpeg12_ppmgr_reset(void)
+{
+    vf_notify_receiver(PROVIDER_NAME,VFRAME_EVENT_PROVIDER_RESET,NULL);
+
+    vmpeg12_local_init();
+
+    printk("vmpeg12dec: vf_ppmgr_reset\n");
+}
+#endif
+
 static void vmpeg_put_timer_func(unsigned long arg)
 {
     struct timer_list *timer = (struct timer_list *)arg;
+
+    receviver_start_e state = RECEIVER_INACTIVE ;
+    if (vf_get_receiver(PROVIDER_NAME)){
+        state = vf_notify_receiver(PROVIDER_NAME,VFRAME_EVENT_PROVIDER_QUREY_STATE,NULL);
+        if((state == RECEIVER_STATE_NULL)||(state == RECEIVER_STATE_NONE)){
+            /* receiver has no event_cb or receiver's event_cb does not process this event */
+            state  = RECEIVER_INACTIVE ;
+        }
+    }else{
+         state  = RECEIVER_INACTIVE ;
+    }
+
+    if ((READ_VREG(MREG_WAIT_BUFFER) != 0) &&
+        (vfq_empty(&recycle_q)) &&
+        (vfq_empty(&display_q)) &&
+        (state == RECEIVER_INACTIVE)) {
+        printk("$$$$$$decoder is waiting for buffer\n");
+        if (++wait_buffer_counter > 4) {
+            amvdec_stop();
+
+#ifdef CONFIG_POST_PROCESS_MANAGER
+            vmpeg12_ppmgr_reset();
+#else
+            vf_light_unreg_provider(&vmpeg_vf_prov);
+            vmpeg12_local_init();
+            vf_reg_provider(&vmpeg_vf_prov);
+#endif
+            vmpeg12_prot_init();
+            amvdec_start();
+        }
+    } else {
+        wait_buffer_counter = 0;
+    }
 
     while (!vfq_empty(&recycle_q) && (READ_VREG(MREG_BUFFERIN) == 0)) {
         vframe_t *vf = vfq_pop(&recycle_q);
@@ -576,8 +619,8 @@ static void vmpeg12_canvas_init(void)
         }
     }
 
-	ccbuf_phyAddress = buf_start + 4 * decbuf_size;
-    WRITE_VREG(MREG_CO_MV_START, buf_start + 4 * decbuf_size + CCBUF_SIZE);
+    ccbuf_phyAddress = buf_start + 5 * decbuf_size;
+    WRITE_VREG(MREG_CO_MV_START, buf_start + 5 * decbuf_size + CCBUF_SIZE);
 
 }
 
@@ -625,6 +668,8 @@ static void vmpeg12_prot_init(void)
     }
     /* clear error count */
     WRITE_VREG(MREG_ERROR_COUNT, 0);
+    /* clear wait buffer status */
+    WRITE_VREG(MREG_WAIT_BUFFER, 0);
 #ifdef NV21
     SET_VREG_MASK(MDEC_PIC_DC_CTRL, 1<<17);
 #endif
@@ -638,6 +683,7 @@ static void vmpeg12_local_init(void)
     vfq_init(&newframe_q, VF_POOL_SIZE+1, &vfp_pool_newframe[0]);
 
     for (i = 0; i < VF_POOL_SIZE; i++) {
+        vfqool[i].index = VF_POOL_SIZE;
         vfq_push(&newframe_q, &vfqool[i]);
     }
 
@@ -648,6 +694,7 @@ static void vmpeg12_local_init(void)
     }
 
     frame_force_skip_flag = 0;
+    wait_buffer_counter = 0;
 
     dec_control &= DEC_CONTROL_INTERNAL_MASK;
 }

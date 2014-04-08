@@ -145,6 +145,11 @@ s32 vpp_set_nonlinear_factor(u32 f);
 
 extern
 u32 vpp_get_nonlinear_factor(void);
+extern
+void vpp_set_video_speed_check(u32 h, u32 w);
+
+extern
+void vpp_get_video_speed_check(u32 *h, u32 *w);
 
 #ifdef CONFIG_AM_VIDEO2
 extern void

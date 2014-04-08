@@ -957,13 +957,15 @@ static void unmux_hpd(void)
     aml_write_reg32(P_PREG_PAD_GPIO2_EN_N, aml_read_reg32(P_PREG_PAD_GPIO2_EN_N)|(1<<10)); //GPIOC_10 as input
 }    
 
-static int read_hpd_gpio(void)
+extern int read_hpd_gpio(void);
+int read_hpd_gpio(void)
 {
     int level;
 //    level = Rd(PREG_PAD_GPIO2_I)&0x1; //read GPIOA_0
     level = !!(aml_read_reg32(P_PREG_PAD_GPIO2_I)&(1<<10)); //read GPIOC_10
     return level;
 }
+EXPORT_SYMBOL(read_hpd_gpio);
 
 #if 0
 static unsigned long clk81_rate = 100000000;

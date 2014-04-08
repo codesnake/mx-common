@@ -2,6 +2,7 @@
 #include <linux/timer.h>
 #include <linux/workqueue.h>
 #include <linux/platform_device.h>
+#include <linux/module.h>
 
 #include <mach/am_regs.h>
 #include <linux/amports/canvas.h>
@@ -11,6 +12,19 @@
 #include "deinterlace.h"
 #ifdef DET3D
 #include "detect3d.h"
+#endif
+
+#ifndef DI_CHAN2_CANVAS
+#define DI_CHAN2_CANVAS DI_CHAN2_CANVAS0
+#endif
+#ifndef DI_CHAN2_LUMA_X
+#define DI_CHAN2_LUMA_X DI_CHAN2_LUMA_X0
+#endif
+#ifndef DI_CHAN2_LUMA_Y
+#define DI_CHAN2_LUMA_Y  DI_CHAN2_LUMA_Y0
+#endif
+#ifndef DI_CHAN2_LUMA_RPT_PAT
+#define DI_CHAN2_LUMA_RPT_PAT DI_CHAN2_LUMA0_RPT_PAT
 #endif
 
 uint di_mtn_1_ctrl1;
@@ -78,6 +92,8 @@ module_param(frame_dynamic_level, int, 0664);
 MODULE_PARM_DESC(cue_enable, "\n cue_enable\n");
 module_param(cue_enable, bool, 0664);
 
+static unsigned int det3d_cfg = 0;
+
 static void init_pd_para(void)
 {
     int i;
@@ -128,10 +144,10 @@ void reset_di_para(void)
   	int nr_zone_0 = 4, nr_zone_1 = 8, nr_zone_2 = 12;
     //int nr_hfilt_en = 0;
     int nr_hfilt_mb_en = 0;
-    //int mtn_modify_en = 1;
-    //int post_mb_en = 0;
-    //int blend_mtn_filt_en = 1;
-    //int blend_data_filt_en = 1;
+    int mtn_modify_en = 1;
+    int post_mb_en = 0;
+    int blend_mtn_filt_en = 1;
+    int blend_data_filt_en = 1;
     unsigned int nr_strength = 0, nr_gain2 = 0, nr_gain1 = 0, nr_gain0 = 0;
 
     nr_strength = noise_reduction_level;
@@ -313,25 +329,25 @@ static void set_di_if0_mif ( DI_MIF_t *mif, int urgent, int hold_line );
 void di_hw_init(void)
 {
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TV
-    WRITE_MPEG_REG(DI_MTN_1_CTRL1, READ_MPEG_REG(DI_MTN_1_CTRL1)&(~(1<<31))); //enable old DI mode for m6tv
-    WRITE_MPEG_REG(DI_CLKG_CTRL, READ_MPEG_REG(DI_CLKG_CTRL)|0x1); //di no clock gate
+    Wr(DI_MTN_1_CTRL1, Rd(DI_MTN_1_CTRL1)&(~(1<<31))); //enable old DI mode for m6tv
+    Wr(DI_CLKG_CTRL, Rd(DI_CLKG_CTRL)|0x1); //di no clock gate
 
     /* fifo size setting from 0x1be60 to 0x1bf20 */
-    WRITE_MPEG_REG(VD1_IF0_LUMA_FIFO_SIZE, 0x1bf20);  // 1a63 is vd1_if0_luma_fifo_size
-    WRITE_MPEG_REG(VD2_IF0_LUMA_FIFO_SIZE, 0x1bf20);  // 1a83 is vd2_if0_luma_fifo_size
-    WRITE_MPEG_REG(DI_INP_LUMA_FIFO_SIZE, 0x1bf20);   // 17d8 is DI_INP_luma_fifo_size
-    WRITE_MPEG_REG(DI_MEM_LUMA_FIFO_SIZE, 0x1bf20);   // 17e5 is DI_MEM_luma_fifo_size
-    WRITE_MPEG_REG(DI_IF1_LUMA_FIFO_SIZE, 0x1bf20);   // 17f2 is  DI_IF1_luma_fifo_size
-    WRITE_MPEG_REG(DI_CHAN2_LUMA_FIFO_SIZE, 0x1bf20); // 17b3 is DI_chan2_luma_fifo_size
+    Wr(VD1_IF0_LUMA_FIFO_SIZE, 0x1bf20);  // 1a63 is vd1_if0_luma_fifo_size
+    Wr(VD2_IF0_LUMA_FIFO_SIZE, 0x1bf20);  // 1a83 is vd2_if0_luma_fifo_size
+    Wr(DI_INP_LUMA_FIFO_SIZE, 0x1bf20);   // 17d8 is DI_INP_luma_fifo_size
+    Wr(DI_MEM_LUMA_FIFO_SIZE, 0x1bf20);   // 17e5 is DI_MEM_luma_fifo_size
+    Wr(DI_IF1_LUMA_FIFO_SIZE, 0x1bf20);   // 17f2 is  DI_IF1_luma_fifo_size
+    Wr(DI_CHAN2_LUMA_FIFO_SIZE, 0x1bf20); // 17b3 is DI_chan2_luma_fifo_size
 #endif
 
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-    WRITE_MPEG_REG(DI_PRE_HOLD, (0 << 31) | (31 << 16) | 31);
+    Wr(DI_PRE_HOLD, (0 << 31) | (31 << 16) | 31);
 #else
-    WRITE_MPEG_REG(DI_PRE_HOLD, (1 << 31) | (31 << 16) | 31);
+    Wr(DI_PRE_HOLD, (1 << 31) | (31 << 16) | 31);
 #endif
 #if defined(CONFIG_ARCH_MESON)
-    WRITE_MPEG_REG(DI_NRMTN_CTRL0, 0xb00a0603);
+    Wr(DI_NRMTN_CTRL0, 0xb00a0603);
 #endif
 
 }
@@ -381,18 +397,24 @@ void enable_di_pre_aml (
   	// set nr wr mif interface.
    	if ( nr_en )
    	{
-     	WRITE_MPEG_REG(DI_NRWR_X, (di_nrwr_mif->start_x <<16) | (di_nrwr_mif->end_x));   	// start_x 0 end_x 719.
-     	WRITE_MPEG_REG(DI_NRWR_Y, (di_nrwr_mif->start_y <<16) | (di_nrwr_mif->end_y));   	// start_y 0 end_y 239.
-     	WRITE_MPEG_REG(DI_NRWR_CTRL, di_nrwr_mif->canvas_num );     						// canvas index.
+     	Wr(DI_NRWR_X, (di_nrwr_mif->start_x <<16) | (di_nrwr_mif->end_x));   	// start_x 0 end_x 719.
+     	Wr(DI_NRWR_Y, (di_nrwr_mif->start_y <<16) | (di_nrwr_mif->end_y));   	// start_y 0 end_y 239.
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+     	Wr(DI_NRWR_CTRL, di_nrwr_mif->canvas_num |                                  // canvas index
+                       (urgent<<16));     						        // urgent bit 16
+#else
+     	Wr(DI_NRWR_CTRL, di_nrwr_mif->canvas_num );     						// canvas index. 
+     	                                                                    // urgent bit 8
+#endif
 #if !defined(CONFIG_ARCH_MESON)
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-     	WRITE_MPEG_REG(DI_NR_CTRL0, nr_ctrl0 | (cue_enable << 26));
+     	Wr(DI_NR_CTRL0, nr_ctrl0 | (cue_enable << 26));
 #else
-     	WRITE_MPEG_REG(DI_NR_CTRL0, nr_ctrl0);
+     	Wr(DI_NR_CTRL0, nr_ctrl0);
 #endif
-     	WRITE_MPEG_REG(DI_NR_CTRL1, nr_ctrl1);
-     	WRITE_MPEG_REG(DI_NR_CTRL2, nr_ctrl2);
-     	WRITE_MPEG_REG(DI_NR_CTRL3, nr_ctrl3);
+     	Wr(DI_NR_CTRL1, nr_ctrl1);
+     	Wr(DI_NR_CTRL2, nr_ctrl2);
+     	Wr(DI_NR_CTRL3, nr_ctrl3);
 #endif
    	}
 
@@ -400,43 +422,54 @@ void enable_di_pre_aml (
     if (mtn_en )
     {
 #ifdef NEW_DI
-        WRITE_MPEG_REG(DI_CONTWR_X,    (di_contwr_mif->start_x <<16) | (di_contwr_mif->end_x));   // start_x 0 end_x 719.
-        WRITE_MPEG_REG(DI_CONTWR_Y,    (di_contwr_mif->start_y <<16) | (di_contwr_mif->end_y));   // start_y 0 end_y 239.
-        WRITE_MPEG_REG(DI_CONTWR_CTRL,  di_contwr_mif->canvas_num |  // canvas index.
+        Wr(DI_CONTWR_X,    (di_contwr_mif->start_x <<16) | (di_contwr_mif->end_x));   // start_x 0 end_x 719.
+        Wr(DI_CONTWR_Y,    (di_contwr_mif->start_y <<16) | (di_contwr_mif->end_y));   // start_y 0 end_y 239.
+        Wr(DI_CONTWR_CTRL,  di_contwr_mif->canvas_num |  // canvas index.
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+                          (urgent << 8));       // urgent.
+#else
                           (0 << 8));       // urgent.
-  
-        WRITE_MPEG_REG(DI_CONTPRD_X,   (di_contprd_mif->start_x <<16)  | (di_contprd_mif->end_x));   // start_x 0 end_x 719.
-        WRITE_MPEG_REG(DI_CONTPRD_Y,   (di_contprd_mif->start_y <<16)  | (di_contprd_mif->end_y));   // start_y 0 end_y 239.
-        WRITE_MPEG_REG(DI_CONTP2RD_X,  (di_contp2rd_mif->start_x <<16) | (di_contp2rd_mif->end_x));   // start_x 0 end_x 719.
-        WRITE_MPEG_REG(DI_CONTP2RD_Y,  (di_contp2rd_mif->start_y <<16) | (di_contp2rd_mif->end_y));             // start_y 0 end_y 239.
-        WRITE_MPEG_REG(DI_CONTRD_CTRL, (di_contprd_mif->canvas_num <<8 )     |          //mtnp canvas index.
+#endif
+        Wr(DI_CONTPRD_X,   (di_contprd_mif->start_x <<16)  | (di_contprd_mif->end_x));   // start_x 0 end_x 719.
+        Wr(DI_CONTPRD_Y,   (di_contprd_mif->start_y <<16)  | (di_contprd_mif->end_y));   // start_y 0 end_y 239.
+        Wr(DI_CONTP2RD_X,  (di_contp2rd_mif->start_x <<16) | (di_contp2rd_mif->end_x));   // start_x 0 end_x 719.
+        Wr(DI_CONTP2RD_Y,  (di_contp2rd_mif->start_y <<16) | (di_contp2rd_mif->end_y));             // start_y 0 end_y 239.
+        Wr(DI_CONTRD_CTRL, (di_contprd_mif->canvas_num <<8 )     |          //mtnp canvas index.
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+                          (urgent << 16)                             |          // urgent
+#else
                           (1 << 16)                             |          // urgent
+#endif
                            di_contp2rd_mif->canvas_num );                    // current field mtn canvas index.        	
 
 #endif       	
-       	WRITE_MPEG_REG(DI_MTNWR_X, (di_mtnwr_mif->start_x <<16) | (di_mtnwr_mif->end_x));   	// start_x 0 end_x 719.
-       	WRITE_MPEG_REG(DI_MTNWR_Y, (di_mtnwr_mif->start_y <<16) | (di_mtnwr_mif->end_y));   	// start_y 0 end_y 239.
-       	WRITE_MPEG_REG(DI_MTNWR_CTRL, di_mtnwr_mif->canvas_num |  								// canvas index.
+       	Wr(DI_MTNWR_X, (di_mtnwr_mif->start_x <<16) | (di_mtnwr_mif->end_x));   	// start_x 0 end_x 719.
+       	Wr(DI_MTNWR_Y, (di_mtnwr_mif->start_y <<16) | (di_mtnwr_mif->end_y));   	// start_y 0 end_y 239.
+       	Wr(DI_MTNWR_CTRL, di_mtnwr_mif->canvas_num |  								// canvas index.
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+                      (urgent << 8));       															// urgent.
+#else
                       (0 << 8));       															// urgent.
+#endif
 #if !defined(CONFIG_ARCH_MESON)
-       //	WRITE_MPEG_REG(DI_MTN_CTRL, (1 << 31) | (1 << 30) | (1 << 29) |  (mtn_ctrl_char_diff_cnt<< 24) |  (mtn_ctrl_diff_level<<16) |   (mtn_ctrl_high_level<<8) |    (mtn_ctrl_low_level<< 0));
-       //   WRITE_MPEG_REG(DI_MTN_CTRL,0x2300f080);
-        WRITE_MPEG_REG(DI_MTN_CTRL,mtn_ctrl);
-       	WRITE_MPEG_REG(DI_MTN_CTRL1, (mtn_ctrl1_shift<< 8) |  mtn_ctrl1_reduce);
+       //	Wr(DI_MTN_CTRL, (1 << 31) | (1 << 30) | (1 << 29) |  (mtn_ctrl_char_diff_cnt<< 24) |  (mtn_ctrl_diff_level<<16) |   (mtn_ctrl_high_level<<8) |    (mtn_ctrl_low_level<< 0));
+       //   Wr(DI_MTN_CTRL,0x2300f080);
+        Wr(DI_MTN_CTRL,mtn_ctrl);
+       	Wr(DI_MTN_CTRL1, (mtn_ctrl1_shift<< 8) |  mtn_ctrl1_reduce);
 #endif
     }
 
 #ifdef NEW_DI
-        WRITE_MPEG_REG(NR2_FRM_SIZE,((di_nrwr_mif->end_y - di_nrwr_mif->start_y + 1) <<16) | 
+        Wr(NR2_FRM_SIZE,((di_nrwr_mif->end_y - di_nrwr_mif->start_y + 1) <<16) | 
                                           (di_nrwr_mif->end_x - di_nrwr_mif->start_x + 1));
-        WRITE_MPEG_REG_BITS(NR2_SW_EN,nr2_en,4,1);
+        Wr_reg_bits(NR2_SW_EN,nr2_en,4,1);
 #endif
   	// reset pre
-  	WRITE_MPEG_REG(DI_PRE_CTRL, READ_MPEG_REG(DI_PRE_CTRL) |
+  	Wr(DI_PRE_CTRL, Rd(DI_PRE_CTRL) |
                    1 << 31 );                  						// frame reset for the pre modules.
 
 #if defined(CONFIG_ARCH_MESON)
-  	WRITE_MPEG_REG(DI_PRE_CTRL, nr_en |        						// NR enable
+  	Wr(DI_PRE_CTRL, nr_en |        						// NR enable
                     (mtn_en << 1 ) |        						// MTN_EN
                     (pd32_check_en << 2 ) |        					// check 3:2 pulldown
                     (pd22_check_en << 3 ) |        					// check 2:2 pulldown
@@ -454,7 +487,7 @@ void enable_di_pre_aml (
                     (0x1 << 30 )      								// pre soft rst, pre frame rst.
                    );
 #else 
-  	WRITE_MPEG_REG(DI_PRE_CTRL, nr_en |        						// NR enable
+  	Wr(DI_PRE_CTRL, nr_en |        						// NR enable
                     (mtn_en << 1 ) |        						// MTN_EN
                     (pd32_check_en << 2 ) |        					// check 3:2 pulldown
                     (pd22_check_en << 3 ) |        					// check 2:2 pulldown
@@ -475,10 +508,12 @@ void enable_di_pre_aml (
 #endif
 
 #ifdef DET3D
-    if(det3d_en){
+    if(det3d_en && (!det3d_cfg)) {
         det3d_enable(1);
-    } else {
+	det3d_cfg = 1;
+    } else if((!det3d_en) && det3d_cfg) {
         det3d_enable(0);
+	det3d_cfg = 0;
     }
 #endif
 }
@@ -530,7 +565,7 @@ static void set_di_inp_fmt_more (int hfmt_en,
 	int repeat_l0_en = 1, nrpt_phase0_en = 0;
     int vt_phase_step = (16 >> vt_yc_ratio);
 
-    WRITE_MPEG_REG(DI_INP_FMT_CTRL,
+    Wr(DI_INP_FMT_CTRL,
                               (hz_rpt << 28) 		|    		//hz rpt pixel
                               (hz_ini_phase << 24) 	|     		//hz ini phase
                               (0 << 23)         	|        	//repeat p0 enable
@@ -544,7 +579,7 @@ static void set_di_inp_fmt_more (int hfmt_en,
                               (vfmt_en << 0)             		//vt enable
               		);
 
-    WRITE_MPEG_REG(DI_INP_FMT_W, (y_length << 16) |        		//hz format width
+    Wr(DI_INP_FMT_W, (y_length << 16) |        		//hz format width
                              (c_length << 0)                  	//vt format width
                  	);
 }
@@ -617,7 +652,7 @@ static void set_di_inp_mif ( DI_MIF_t *mif, int urgent,int hold_line)
     // General register
     // ----------------------
 
-    WRITE_MPEG_REG(DI_INP_GEN_REG, (1 << 29)    |     //reset on go field
+    Wr(DI_INP_GEN_REG, (1 << 29)    |     //reset on go field
                                 (urgent << 28)			| 		// chroma urgent bit
                                 (urgent << 27)          	| 		// luma urgent bit.
                                 (1 << 25)                  	| 		// no dummy data.
@@ -635,17 +670,17 @@ static void set_di_inp_mif ( DI_MIF_t *mif, int urgent,int hold_line)
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
     if ( mif->set_separate_en == 2 ) {
          // Enable NV12 Display
-        WRITE_MPEG_REG_BITS(DI_INP_GEN_REG2, 1, 0, 1);
+        Wr_reg_bits(DI_INP_GEN_REG2, 1, 0, 1);
     }
     else{
-        WRITE_MPEG_REG_BITS(DI_INP_GEN_REG2, 0, 0, 1);
+        Wr_reg_bits(DI_INP_GEN_REG2, 0, 0, 1);
     }
 #endif     
 
     // ----------------------
     // Canvas
     // ----------------------
-    WRITE_MPEG_REG(DI_INP_CANVAS0, (mif->canvas0_addr2 << 16) 		| 		// cntl_canvas0_addr2
+    Wr(DI_INP_CANVAS0, (mif->canvas0_addr2 << 16) 		| 		// cntl_canvas0_addr2
                                (mif->canvas0_addr1 << 8)   			| 		// cntl_canvas0_addr1
                                (mif->canvas0_addr0 << 0)        			// cntl_canvas0_addr0
     );
@@ -653,23 +688,23 @@ static void set_di_inp_mif ( DI_MIF_t *mif, int urgent,int hold_line)
     // ----------------------
     // Picture 0 X/Y start,end
     // ----------------------
-    WRITE_MPEG_REG(DI_INP_LUMA_X0, (mif->luma_x_end0 << 16) | 				// cntl_luma_x_end0
+    Wr(DI_INP_LUMA_X0, (mif->luma_x_end0 << 16) | 				// cntl_luma_x_end0
                                (mif->luma_x_start0 << 0)        			// cntl_luma_x_start0
     	);
-    WRITE_MPEG_REG(DI_INP_LUMA_Y0, (mif->luma_y_end0 << 16) | 				// cntl_luma_y_end0
+    Wr(DI_INP_LUMA_Y0, (mif->luma_y_end0 << 16) | 				// cntl_luma_y_end0
                                (mif->luma_y_start0 << 0)        			// cntl_luma_y_start0
     	);
-    WRITE_MPEG_REG(DI_INP_CHROMA_X0, (mif->chroma_x_end0 << 16) |
+    Wr(DI_INP_CHROMA_X0, (mif->chroma_x_end0 << 16) |
                                (mif->chroma_x_start0 << 0)
     	);
-    WRITE_MPEG_REG(DI_INP_CHROMA_Y0, (mif->chroma_y_end0 << 16) |
+    Wr(DI_INP_CHROMA_Y0, (mif->chroma_y_end0 << 16) |
                                (mif->chroma_y_start0 << 0)
     	);
 
     // ----------------------
     // Repeat or skip
     // ----------------------
-    WRITE_MPEG_REG(DI_INP_RPT_LOOP, (0 << 28) |
+    Wr(DI_INP_RPT_LOOP, (0 << 28) |
                                (0 << 24) |
                                (0 << 20) |
                                (0 << 16) |
@@ -679,11 +714,11 @@ static void set_di_inp_mif ( DI_MIF_t *mif, int urgent,int hold_line)
                                (luma0_rpt_loop_end << 0)
         ) ;
 
-    WRITE_MPEG_REG(DI_INP_LUMA0_RPT_PAT, luma0_rpt_loop_pat);
-    WRITE_MPEG_REG(DI_INP_CHROMA0_RPT_PAT, chroma0_rpt_loop_pat);
+    Wr(DI_INP_LUMA0_RPT_PAT, luma0_rpt_loop_pat);
+    Wr(DI_INP_CHROMA0_RPT_PAT, chroma0_rpt_loop_pat);
 
     // Dummy pixel value
-    WRITE_MPEG_REG(DI_INP_DUMMY_PIXEL, 0x00808000);
+    Wr(DI_INP_DUMMY_PIXEL, 0x00808000);
     if ( (mif->set_separate_en != 0) )   // 4:2:0 block mode.
     {
         set_di_inp_fmt_more (
@@ -725,7 +760,7 @@ static void set_di_mem_fmt_more (int hfmt_en,
 {
     int vt_phase_step = (16 >> vt_yc_ratio);
 
-    WRITE_MPEG_REG(DI_MEM_FMT_CTRL,
+    Wr(DI_MEM_FMT_CTRL,
                               (hz_rpt << 28)       	|     		//hz rpt pixel
                               (hz_ini_phase << 24) 	|     		//hz ini phase
                               (0 << 23)         	|        	//repeat p0 enable
@@ -739,7 +774,7 @@ static void set_di_mem_fmt_more (int hfmt_en,
                               (vfmt_en << 0)             		//vt enable
              	);
 
-    WRITE_MPEG_REG(DI_MEM_FMT_W, (y_length << 16) |        	//hz format width
+    Wr(DI_MEM_FMT_W, (y_length << 16) |        	//hz format width
                              (c_length << 0)                  	//vt format width
             	);
 }
@@ -758,7 +793,7 @@ static void set_di_chan2_fmt_more (int hfmt_en,
 {
     int vt_phase_step = (16 >> vt_yc_ratio);
 
-    WRITE_MPEG_REG(DI_CHAN2_FMT_CTRL,
+    Wr(DI_CHAN2_FMT_CTRL,
                               (hz_rpt << 28)       	|     		//hz rpt pixel
                               (hz_ini_phase << 24) 	|     		//hz ini phase
                               (0 << 23)         	|        	//repeat p0 enable
@@ -772,7 +807,7 @@ static void set_di_chan2_fmt_more (int hfmt_en,
                               (vfmt_en << 0)             		//vt enable
              	);
 
-    WRITE_MPEG_REG(DI_CHAN2_FMT_W, (y_length << 16) |        	//hz format width
+    Wr(DI_CHAN2_FMT_W, (y_length << 16) |        	//hz format width
                              (c_length << 0)                  	//vt format width
             	);
 }
@@ -839,7 +874,7 @@ static void set_di_mem_mif ( DI_MIF_t *mif, int urgent, int hold_line)
     // General register
     // ----------------------
 
-    WRITE_MPEG_REG(DI_MEM_GEN_REG, (1 << 29)    |     //reset on go field
+    Wr(DI_MEM_GEN_REG, (1 << 29)    |     //reset on go field
                                 (urgent << 28)    			| 		// urgent bit.
                                 (urgent << 27)             	| 		// urgent bit.
                                 (1 << 25)                  	| 		// no dummy data.
@@ -858,7 +893,7 @@ static void set_di_mem_mif ( DI_MIF_t *mif, int urgent, int hold_line)
     // ----------------------
     // Canvas
     // ----------------------
-    WRITE_MPEG_REG(DI_MEM_CANVAS0, (mif->canvas0_addr2 << 16)		| 	// cntl_canvas0_addr2
+    Wr(DI_MEM_CANVAS0, (mif->canvas0_addr2 << 16)		| 	// cntl_canvas0_addr2
                                (mif->canvas0_addr1 << 8)      		| 	// cntl_canvas0_addr1
                                (mif->canvas0_addr0 << 0)        		// cntl_canvas0_addr0
     	);
@@ -866,23 +901,23 @@ static void set_di_mem_mif ( DI_MIF_t *mif, int urgent, int hold_line)
     // ----------------------
     // Picture 0 X/Y start,end
     // ----------------------
-    WRITE_MPEG_REG(DI_MEM_LUMA_X0, (mif->luma_x_end0 << 16) 		| 	// cntl_luma_x_end0
+    Wr(DI_MEM_LUMA_X0, (mif->luma_x_end0 << 16) 		| 	// cntl_luma_x_end0
                                (mif->luma_x_start0 << 0)        		// cntl_luma_x_start0
     	);
-    WRITE_MPEG_REG(DI_MEM_LUMA_Y0, (mif->luma_y_end0 << 16)   		| 	// cntl_luma_y_end0
+    Wr(DI_MEM_LUMA_Y0, (mif->luma_y_end0 << 16)   		| 	// cntl_luma_y_end0
                                (mif->luma_y_start0 << 0)        		// cntl_luma_y_start0
     	);
-    WRITE_MPEG_REG(DI_MEM_CHROMA_X0, (mif->chroma_x_end0 << 16) |
+    Wr(DI_MEM_CHROMA_X0, (mif->chroma_x_end0 << 16) |
                                (mif->chroma_x_start0 << 0)
     	);
-    WRITE_MPEG_REG(DI_MEM_CHROMA_Y0, (mif->chroma_y_end0 << 16) |
+    Wr(DI_MEM_CHROMA_Y0, (mif->chroma_y_end0 << 16) |
                                (mif->chroma_y_start0 << 0)
     	);
 
     // ----------------------
     // Repeat or skip
     // ----------------------
-    WRITE_MPEG_REG(DI_MEM_RPT_LOOP, (0 << 28) |
+    Wr(DI_MEM_RPT_LOOP, (0 << 28) |
                                (0   << 24) |
                                (0   << 20) |
                                (0     << 16) |
@@ -892,11 +927,11 @@ static void set_di_mem_mif ( DI_MIF_t *mif, int urgent, int hold_line)
                                (luma0_rpt_loop_end << 0)
         ) ;
 
-    WRITE_MPEG_REG(DI_MEM_LUMA0_RPT_PAT, luma0_rpt_loop_pat);
-    WRITE_MPEG_REG(DI_MEM_CHROMA0_RPT_PAT, chroma0_rpt_loop_pat);
+    Wr(DI_MEM_LUMA0_RPT_PAT, luma0_rpt_loop_pat);
+    Wr(DI_MEM_CHROMA0_RPT_PAT, chroma0_rpt_loop_pat);
 
     // Dummy pixel value
-    WRITE_MPEG_REG(DI_MEM_DUMMY_PIXEL, 0x00808000);
+    Wr(DI_MEM_DUMMY_PIXEL, 0x00808000);
     if ( (mif->set_separate_en != 0))   // 4:2:0 block mode.
     {
         set_di_mem_fmt_more (
@@ -936,7 +971,7 @@ static void set_di_if1_fmt_more (int hfmt_en,
 {
     int vt_phase_step = (16 >> vt_yc_ratio);
 
-    WRITE_MPEG_REG(DI_IF1_FMT_CTRL,
+    VSYNC_WR_MPEG_REG(DI_IF1_FMT_CTRL,
                               (hz_rpt << 28)       	|     	//hz rpt pixel
                               (hz_ini_phase << 24) 	|     	//hz ini phase
                               (0 << 23)         	|      	//repeat p0 enable
@@ -950,7 +985,7 @@ static void set_di_if1_fmt_more (int hfmt_en,
                               (vfmt_en << 0)             	//vt enable
                    	);
 
-    WRITE_MPEG_REG(DI_IF1_FMT_W, (y_length << 16) | 		//hz format width
+    VSYNC_WR_MPEG_REG(DI_IF1_FMT_W, (y_length << 16) | 		//hz format width
                              (c_length << 0)            	//vt format width
              		);
 }
@@ -1166,7 +1201,7 @@ static void set_di_chan2_mif ( DI_MIF_t *mif, int urgent, int hold_line)
     // General register
     // ----------------------
 
-    WRITE_MPEG_REG(DI_CHAN2_GEN_REG, (1 << 29)    |     //reset on go field
+    Wr(DI_CHAN2_GEN_REG, (1 << 29)    |     //reset on go field
                                 (urgent << 28)            		|   // urgent
                                 (urgent << 27)               		|  	// luma urgent
                                 (1 << 25)        					| 	// no dummy data.
@@ -1187,7 +1222,7 @@ static void set_di_chan2_mif ( DI_MIF_t *mif, int urgent, int hold_line)
     // ----------------------
     // Canvas
     // ----------------------
-    WRITE_MPEG_REG(DI_CHAN2_CANVAS, (0 << 16) 		| 		// cntl_canvas0_addr2
+    Wr(DI_CHAN2_CANVAS, (0 << 16) 		| 		// cntl_canvas0_addr2
                                 (0 << 8)      		| 		// cntl_canvas0_addr1
                                 (mif->canvas0_addr0 << 0)   // cntl_canvas0_addr0
     );
@@ -1195,17 +1230,17 @@ static void set_di_chan2_mif ( DI_MIF_t *mif, int urgent, int hold_line)
     // ----------------------
     // Picture 0 X/Y start,end
     // ----------------------
-    WRITE_MPEG_REG(DI_CHAN2_LUMA_X, (mif->luma_x_end0 << 16) 	| 		// cntl_luma_x_end0
+    Wr(DI_CHAN2_LUMA_X, (mif->luma_x_end0 << 16) 	| 		// cntl_luma_x_end0
                                 (mif->luma_x_start0 << 0)        		// cntl_luma_x_start0
     	);
-    WRITE_MPEG_REG(DI_CHAN2_LUMA_Y, (mif->luma_y_end0 << 16)  | 		// cntl_luma_y_end0
+    Wr(DI_CHAN2_LUMA_Y, (mif->luma_y_end0 << 16)  | 		// cntl_luma_y_end0
                                 (mif->luma_y_start0 << 0)        		// cntl_luma_y_start0
     	);
 
     // ----------------------
     // Repeat or skip
     // ----------------------
-    WRITE_MPEG_REG(DI_CHAN2_RPT_LOOP, (0 << 28) |
+    Wr(DI_CHAN2_RPT_LOOP, (0 << 28) |
                                 (0   << 24) |
                                 (0   << 20) |
                                 (0   << 16) |
@@ -1215,10 +1250,10 @@ static void set_di_chan2_mif ( DI_MIF_t *mif, int urgent, int hold_line)
                                 (luma0_rpt_loop_end << 0)
     );
 
-    WRITE_MPEG_REG(DI_CHAN2_LUMA_RPT_PAT, luma0_rpt_loop_pat);
+    Wr(DI_CHAN2_LUMA_RPT_PAT, luma0_rpt_loop_pat);
 
     // Dummy pixel value
-    WRITE_MPEG_REG(DI_CHAN2_DUMMY_PIXEL, 0x00808000);
+    Wr(DI_CHAN2_DUMMY_PIXEL, 0x00808000);
 
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TV
     if ( (mif->set_separate_en != 0))   // 4:2:0 block mode.
@@ -1432,8 +1467,8 @@ static void set_di_if0_mif ( DI_MIF_t *mif, int urgent, int hold_line)
 
 void initial_di_pre_aml ( int hsize_pre, int vsize_pre, int hold_line )
 {
-   	WRITE_MPEG_REG(DI_PRE_SIZE, (hsize_pre -1 ) | ((vsize_pre -1) << 16) );
-   	WRITE_MPEG_REG(DI_PRE_CTRL, 0 |        		// NR enable
+   	Wr(DI_PRE_SIZE, (hsize_pre -1 ) | ((vsize_pre -1) << 16) );
+   	Wr(DI_PRE_CTRL, 0 |        		// NR enable
                     (0 << 1 ) |        			// MTN_EN
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
                     (1 << 2 ) |        			// check 3:2 pulldown
@@ -1455,8 +1490,8 @@ void initial_di_pre_aml ( int hsize_pre, int vsize_pre, int hold_line )
                     (0x3 << 30)      			// pre soft rst, pre frame rst.
            	);
 
-    WRITE_MPEG_REG(DI_MC_22LVL0, (READ_MPEG_REG(DI_MC_22LVL0) & 0xffff0000 ) | 256);                //   field 22 level
-    WRITE_MPEG_REG(DI_MC_32LVL0, (READ_MPEG_REG(DI_MC_32LVL0) & 0xffffff00 ) | 16);       				// field 32 level
+    Wr(DI_MC_22LVL0, (Rd(DI_MC_22LVL0) & 0xffff0000 ) | 256);                //   field 22 level
+    Wr(DI_MC_32LVL0, (Rd(DI_MC_32LVL0) & 0xffffff00 ) | 16);       				// field 32 level
 }
 
 void initial_di_post_2 ( int hsize_post, int vsize_post, int hold_line )
@@ -1497,7 +1532,7 @@ void di_post_switch_buffer (
    DI_SIM_MIF_t    *di_mtncrd_mif,
    DI_SIM_MIF_t    *di_mtnprd_mif,
    int ei_en, int blend_en, int blend_mtn_en, int blend_mode, int di_vpp_en, int di_ddr_en,
-   int post_field_num, int hold_line,
+   int post_field_num, int hold_line, int urgent,
    unsigned long * reg_mtn_info )
 {
   	int ei_only;
@@ -1526,27 +1561,26 @@ void di_post_switch_buffer (
    	// motion for current display field.
     if ( blend_mtn_en )
     {
-        if(overturn)
-			VSYNC_WR_MPEG_REG(DI_MTNRD_CTRL, (di_mtnprd_mif->canvas_num <<8 ) |									//mtnp canvas index.
-							(1 << 16) | 																		// urgent
-							(0xf << 17) |
-							 di_mtncrd_mif->canvas_num );                                                       // current field mtn canvas index.
-		else
-	      	VSYNC_WR_MPEG_REG(DI_MTNRD_CTRL, (di_mtnprd_mif->canvas_num <<8 ) |          							//mtnp canvas index.
-	                        (1 << 16) |          																// urgent
-	                        (0 << 17) |
-	                         di_mtncrd_mif->canvas_num );                    									// current field mtn canvas index.
+        
+        VSYNC_WR_MPEG_REG(DI_MTNRD_CTRL, (di_mtnprd_mif->canvas_num <<8 )|//mtnp canvas index.
+					 (urgent << 16) |// urgent
+					 di_mtncrd_mif->canvas_num ); // current field mtn canvas index.
+		              									
     }
 
     if ( di_ddr_en )
     {
        VSYNC_WR_MPEG_REG(DI_DIWR_CTRL, di_diwr_mif->canvas_num |               							// canvas index.
-                        (di_vpp_en << 8));            													// urgent.
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+                        (urgent << 16));            													// urgent.
+#else
+                        (urgent << 8));            													// urgent.
+#endif
     }
    	if ( ei_only == 0)
    	{
 #if defined(CONFIG_ARCH_MESON)
-      	VSYNC_WR_MPEG_REG(DI_BLEND_CTRL,  (READ_MPEG_REG(DI_BLEND_CTRL) & (~((1 << 25) | (3 << 20 )))) | // clean some bit we need to set.
+      	VSYNC_WR_MPEG_REG(DI_BLEND_CTRL,  (Rd(DI_BLEND_CTRL) & (~((1 << 25) | (3 << 20 )))) | // clean some bit we need to set.
                               (blend_mtn_en << 26 ) |   													// blend mtn enable.
                               (0 << 25 ) |   																// blend with the mtn of the pre display field and next display field.
                               (1 << 24 ) |   																// blend with pre display field.
@@ -1566,7 +1600,7 @@ void di_post_switch_buffer (
     VSYNC_WR_MPEG_REG(DI_BLEND_CTRL1, (blend_ctrl1_char_level<< 24 ) |    ( blend_ctrl1_angle_thd << 16 ) |    ( blend_ctrl1_filt_thd<< 8 )  |    ( blend_ctrl1_diff_thd));
     VSYNC_WR_MPEG_REG(DI_BLEND_CTRL2,   (blend_ctrl2_black_level<< 8 ) |     (blend_ctrl2_mtn_no_mov)  );
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TV
-//    VSYNC_WR_MPEG_REG(DI_BLEND_CTRL, READ_MPEG_REG(DI_BLEND_CTRL)&(~(1<<31)));
+//    VSYNC_WR_MPEG_REG(DI_BLEND_CTRL, Rd(DI_BLEND_CTRL)&(~(1<<31)));
 #endif    
 #endif
    	}
@@ -1581,7 +1615,7 @@ void enable_di_post_2 (
    DI_SIM_MIF_t    *di_mtncrd_mif,
    DI_SIM_MIF_t    *di_mtnprd_mif,
    int ei_en, int blend_en, int blend_mtn_en, int blend_mode, int di_vpp_en, int di_ddr_en,
-   int post_field_num, int hold_line,
+   int post_field_num, int hold_line, int urgent,
    unsigned long * reg_mtn_info )
 {
   	int ei_only;
@@ -1615,16 +1649,10 @@ void enable_di_post_2 (
         VSYNC_WR_MPEG_REG(DI_MTNPRD_Y, (di_mtnprd_mif->start_y <<16) | (di_mtnprd_mif->end_y));   			// start_y 0 end_y 239.
       	VSYNC_WR_MPEG_REG(DI_MTNCRD_X, (di_mtncrd_mif->start_x <<16) | (di_mtncrd_mif->end_x));   				// start_x 0 end_x 719.
       	VSYNC_WR_MPEG_REG(DI_MTNCRD_Y, (di_mtncrd_mif->start_y <<16) | (di_mtncrd_mif->end_y));             	// start_y 0 end_y 239.
-		if(overturn)
-			VSYNC_WR_MPEG_REG(DI_MTNRD_CTRL, (di_mtnprd_mif->canvas_num <<8 ) |									//mtnp canvas index.
-							(1 << 16) | 																		// urgent
-							(0xf << 17) |
-							 di_mtncrd_mif->canvas_num );                                                       // current field mtn canvas index.
-		else
-			VSYNC_WR_MPEG_REG(DI_MTNRD_CTRL, (di_mtnprd_mif->canvas_num <<8 ) |          							//mtnp canvas index.
-	                        (1 << 16) |          																// urgent
-	                        (0 << 17) |
-	                         di_mtncrd_mif->canvas_num );                    									// current field mtn canvas index.
+	VSYNC_WR_MPEG_REG(DI_MTNRD_CTRL, (di_mtnprd_mif->canvas_num <<8 ) |									//mtnp canvas index.
+					 (urgent << 16) |// urgent
+					 di_mtncrd_mif->canvas_num );
+                                         // current field mtn canvas index
     }
 
     if ( di_ddr_en )
@@ -1632,13 +1660,17 @@ void enable_di_post_2 (
        VSYNC_WR_MPEG_REG(DI_DIWR_X, (di_diwr_mif->start_x <<16) | (di_diwr_mif->end_x));   				// start_x 0 end_x 719.
        VSYNC_WR_MPEG_REG(DI_DIWR_Y, (di_diwr_mif->start_y <<16) | (di_diwr_mif->end_y *2 + 1 ));         	// start_y 0 end_y 479.
        VSYNC_WR_MPEG_REG(DI_DIWR_CTRL, di_diwr_mif->canvas_num |               							// canvas index.
-                        (di_vpp_en << 8));            													// urgent.
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+                        (urgent << 16));            													// urgent.
+#else
+                        (urgent << 8));            													// urgent.
+#endif
     }
 
    	if ( ei_only == 0)
    	{
 #if defined(CONFIG_ARCH_MESON)
-      	VSYNC_WR_MPEG_REG(DI_BLEND_CTRL,  (READ_MPEG_REG(DI_BLEND_CTRL) & (~((1 << 25) | (3 << 20 )))) | // clean some bit we need to set.
+      	VSYNC_WR_MPEG_REG(DI_BLEND_CTRL,  (Rd(DI_BLEND_CTRL) & (~((1 << 25) | (3 << 20 )))) | // clean some bit we need to set.
                               (blend_mtn_en << 26 ) |   													// blend mtn enable.
                               (0 << 25 ) |   																// blend with the mtn of the pre display field and next display field.
                               (1 << 24 ) |   																// blend with pre display field.
@@ -1658,7 +1690,7 @@ void enable_di_post_2 (
     VSYNC_WR_MPEG_REG(DI_BLEND_CTRL1, (blend_ctrl1_char_level<< 24 ) |    ( blend_ctrl1_angle_thd << 16 ) |    ( blend_ctrl1_filt_thd<< 8 )  |    ( blend_ctrl1_diff_thd));
     VSYNC_WR_MPEG_REG(DI_BLEND_CTRL2,   (blend_ctrl2_black_level<< 8 ) |     (blend_ctrl2_mtn_no_mov)  );
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TV
-//    VSYNC_WR_MPEG_REG(DI_BLEND_CTRL, READ_MPEG_REG(DI_BLEND_CTRL)&(~(1<<31)));
+//    VSYNC_WR_MPEG_REG(DI_BLEND_CTRL, Rd(DI_BLEND_CTRL)&(~(1<<31)));
 #endif    
 #endif
    	}
@@ -1712,7 +1744,7 @@ void di_post_switch_buffer_pd (
     DI_SIM_MIF_t    *di_mtncrd_mif,
     DI_SIM_MIF_t    *di_mtnprd_mif,
     int ei_en, int blend_en, int blend_mtn_en, int blend_mode, int di_vpp_en, int di_ddr_en,
-    int post_field_num, int hold_line)
+    int post_field_num, int hold_line, int urgent)
 {
     int blend_mtn_filt_en = 1;
     int blend_data_filt_en = 1;
@@ -1740,26 +1772,24 @@ void di_post_switch_buffer_pd (
 
     // motion for current display field.
     if (blend_mtn_en) {
-		if(overturn)
-			VSYNC_WR_MPEG_REG(DI_MTNRD_CTRL, (di_mtnprd_mif->canvas_num << 8) |								   //mtnp canvas index.
-						   (1 << 16) |																		   // urgent
-						   (0xf << 17) |
-						   di_mtncrd_mif->canvas_num);                                                         // current field mtn canvas index.
-		else
-	        VSYNC_WR_MPEG_REG(DI_MTNRD_CTRL, (di_mtnprd_mif->canvas_num << 8) |                                   //mtnp canvas index.
-	                       (1 << 16) |                                                                         // urgent
-	                       (0 << 17) |
-	                       di_mtncrd_mif->canvas_num);                                                         // current field mtn canvas index.
+	VSYNC_WR_MPEG_REG(DI_MTNRD_CTRL, (di_mtnprd_mif->canvas_num << 8) | //mtnp canvas index.
+					 (urgent << 16) | // urgent
+					 di_mtncrd_mif->canvas_num);
+                                         // current field mtn canvas index.
     }
 
     if (di_ddr_en) {
         VSYNC_WR_MPEG_REG(DI_DIWR_CTRL, di_diwr_mif->canvas_num |                                           // canvas index.
-                       (di_vpp_en << 8));                                                              // urgent.
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+                       (urgent << 16));                                                              // urgent.
+#else
+                       (urgent << 8));                                                              // urgent.
+#endif
     }
 
     if (ei_only == 0) {
 #if defined(CONFIG_ARCH_MESON)
-        VSYNC_WR_MPEG_REG(DI_BLEND_CTRL, (READ_MPEG_REG(DI_BLEND_CTRL) & (~((1 << 25) | (3 << 20)))) |   // clean some bit we need to set.
+        VSYNC_WR_MPEG_REG(DI_BLEND_CTRL, (Rd(DI_BLEND_CTRL) & (~((1 << 25) | (3 << 20)))) |   // clean some bit we need to set.
                        (blend_mtn_en << 26) |                                                        // blend mtn enable.
                        (0 << 25) |                                                                   // blend with the mtn of the pre display field and next display field.
                        (1 << 24) |                                                                   // blend with pre display field.
@@ -1789,7 +1819,7 @@ void enable_di_post_pd(
     DI_SIM_MIF_t    *di_mtncrd_mif,
     DI_SIM_MIF_t    *di_mtnprd_mif,
     int ei_en, int blend_en, int blend_mtn_en, int blend_mode, int di_vpp_en, int di_ddr_en,
-    int post_field_num, int hold_line)
+    int post_field_num, int hold_line, int urgent)
 {
     int blend_mtn_filt_en = 1;
     int blend_data_filt_en = 1;
@@ -1814,28 +1844,26 @@ void enable_di_post_pd(
         VSYNC_WR_MPEG_REG(DI_MTNPRD_Y, (di_mtnprd_mif->start_y << 16) | (di_mtnprd_mif->end_y));           // start_y 0 end_y 239.
         VSYNC_WR_MPEG_REG(DI_MTNCRD_X, (di_mtncrd_mif->start_x << 16) | (di_mtncrd_mif->end_x));               // start_x 0 end_x 719.
         VSYNC_WR_MPEG_REG(DI_MTNCRD_Y, (di_mtncrd_mif->start_y << 16) | (di_mtncrd_mif->end_y));               // start_y 0 end_y 239.
-		if(overturn)
-			VSYNC_WR_MPEG_REG(DI_MTNRD_CTRL, (di_mtnprd_mif->canvas_num << 8) |								   //mtnp canvas index.
-						   (1 << 16) |																		   // urgent
-						   (0xf << 17) |
-						   di_mtncrd_mif->canvas_num);                                                         // current field mtn canvas index.
-		else
-			VSYNC_WR_MPEG_REG(DI_MTNRD_CTRL, (di_mtnprd_mif->canvas_num << 8) |                                   //mtnp canvas index.
-	                       (1 << 16) |                                                                         // urgent
-	                       (0 << 17) |
-	                       di_mtncrd_mif->canvas_num);                                                         // current field mtn canvas index.
+	VSYNC_WR_MPEG_REG(DI_MTNRD_CTRL, (di_mtnprd_mif->canvas_num << 8) |//mtnp canvas index.
+					 (urgent << 16) |  // urgent
+					 di_mtncrd_mif->canvas_num);
+                                         // current field mtn canvas index.
     }
 
     if (di_ddr_en) {
         VSYNC_WR_MPEG_REG(DI_DIWR_X, (di_diwr_mif->start_x << 16) | (di_diwr_mif->end_x));                  // start_x 0 end_x 719.
         VSYNC_WR_MPEG_REG(DI_DIWR_Y, (di_diwr_mif->start_y << 16) | (di_diwr_mif->end_y * 2 + 1));          // start_y 0 end_y 479.
         VSYNC_WR_MPEG_REG(DI_DIWR_CTRL, di_diwr_mif->canvas_num |                                           // canvas index.
-                       (di_vpp_en << 8));                                                              // urgent.
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+                       (urgent << 16));                                                              // urgent.
+#else
+                       (urgent << 8));                                                              // urgent.
+#endif
     }
 
     if (ei_only == 0) {
 #if defined(CONFIG_ARCH_MESON)
-        VSYNC_WR_MPEG_REG(DI_BLEND_CTRL, (READ_MPEG_REG(DI_BLEND_CTRL) & (~((1 << 25) | (3 << 20)))) |   // clean some bit we need to set.
+        VSYNC_WR_MPEG_REG(DI_BLEND_CTRL, (Rd(DI_BLEND_CTRL) & (~((1 << 25) | (3 << 20)))) |   // clean some bit we need to set.
                        (blend_mtn_en << 26) |                                                        // blend mtn enable.
                        (0 << 25) |                                                                   // blend with the mtn of the pre display field and next display field.
                        (1 << 24) |                                                                   // blend with pre display field.
@@ -1905,7 +1933,7 @@ void disable_post_deinterlace_2(void)
 {
 	VSYNC_WR_MPEG_REG(DI_POST_CTRL, 0x3 << 30);
     VSYNC_WR_MPEG_REG(DI_POST_SIZE, (32-1) | ((128-1) << 16));
-	VSYNC_WR_MPEG_REG(DI_IF1_GEN_REG, READ_MPEG_REG(DI_IF1_GEN_REG) & 0xfffffffe);
+	VSYNC_WR_MPEG_REG(DI_IF1_GEN_REG, Rd(DI_IF1_GEN_REG) & 0xfffffffe);
 }
 
 void enable_di_mode_check_2( int win0_start_x, int win0_end_x, int win0_start_y, int win0_end_y,
@@ -1921,42 +1949,42 @@ void enable_di_mode_check_2( int win0_start_x, int win0_end_x, int win0_start_y,
     pd_win_prop[3].pixels_num = (win3_end_x-win3_start_x)*(win3_end_y-win3_start_y);
     pd_win_prop[4].pixels_num = (win4_end_x-win4_start_x)*(win4_end_y-win4_start_y);
     
-    WRITE_MPEG_REG(DI_MC_REG0_X, (win0_start_x <<16) |     		// start_x
+    Wr(DI_MC_REG0_X, (win0_start_x <<16) |     		// start_x
                        win0_end_x );       						// end_x
-    WRITE_MPEG_REG(DI_MC_REG0_Y, (win0_start_y <<16) |     		// start_y
+    Wr(DI_MC_REG0_Y, (win0_start_y <<16) |     		// start_y
                        win0_end_y );        					// end_x
-    WRITE_MPEG_REG(DI_MC_REG1_X, (win1_start_x <<16) |     		// start_x
+    Wr(DI_MC_REG1_X, (win1_start_x <<16) |     		// start_x
                        win1_end_x );       						// end_x
-    WRITE_MPEG_REG(DI_MC_REG1_Y, (win1_start_y <<16) |     		// start_y
+    Wr(DI_MC_REG1_Y, (win1_start_y <<16) |     		// start_y
                        win1_end_y );        					// end_x
-    WRITE_MPEG_REG(DI_MC_REG2_X, (win2_start_x <<16) |     		// start_x
+    Wr(DI_MC_REG2_X, (win2_start_x <<16) |     		// start_x
                        win2_end_x );       						// end_x
-    WRITE_MPEG_REG(DI_MC_REG2_Y, (win2_start_y <<16) |     		// start_y
+    Wr(DI_MC_REG2_Y, (win2_start_y <<16) |     		// start_y
                        win2_end_y );        					// end_x
-    WRITE_MPEG_REG(DI_MC_REG3_X, (win3_start_x <<16) |     		// start_x
+    Wr(DI_MC_REG3_X, (win3_start_x <<16) |     		// start_x
                        win3_end_x );       						// end_x
-    WRITE_MPEG_REG(DI_MC_REG3_Y, (win3_start_y <<16) |     		// start_y
+    Wr(DI_MC_REG3_Y, (win3_start_y <<16) |     		// start_y
                        win3_end_y );        					// end_x
-    WRITE_MPEG_REG(DI_MC_REG4_X, (win4_start_x <<16) |     		// start_x
+    Wr(DI_MC_REG4_X, (win4_start_x <<16) |     		// start_x
                        win4_end_x );       						// end_x
-    WRITE_MPEG_REG(DI_MC_REG4_Y, (win4_start_y <<16) |     		// start_y
+    Wr(DI_MC_REG4_Y, (win4_start_y <<16) |     		// start_y
                        win4_end_y );        					// end_x
 
-    WRITE_MPEG_REG(DI_MC_32LVL1, pd_win_prop[3].win_32lvl |          			//region 3
+    Wr(DI_MC_32LVL1, pd_win_prop[3].win_32lvl |          			//region 3
                      (pd_win_prop[4].win_32lvl << 8));   						//region 4
-    WRITE_MPEG_REG(DI_MC_32LVL0, field_32lvl        |   		//field 32 level
+    Wr(DI_MC_32LVL0, field_32lvl        |   		//field 32 level
                      (pd_win_prop[0].win_32lvl << 8)  |   					//region 0
                      (pd_win_prop[1].win_32lvl << 16) |   					//region 1
                      (pd_win_prop[2].win_32lvl << 24));  						//region 2.
-    WRITE_MPEG_REG(DI_MC_22LVL0,  field_22lvl  |           		// field 22 level
+    Wr(DI_MC_22LVL0,  field_22lvl  |           		// field 22 level
                      (pd_win_prop[0].win_22lvl << 16));   					// region 0.
 
-    WRITE_MPEG_REG(DI_MC_22LVL1,  pd_win_prop[1].win_22lvl  |           		// region 1
+    Wr(DI_MC_22LVL1,  pd_win_prop[1].win_22lvl  |           		// region 1
                      (pd_win_prop[2].win_22lvl << 16));   					// region 2.
 
-    WRITE_MPEG_REG(DI_MC_22LVL2, pd_win_prop[3].win_22lvl  |           		// region 3
+    Wr(DI_MC_22LVL2, pd_win_prop[3].win_22lvl  |           		// region 3
                      (pd_win_prop[4].win_22lvl << 16));   					// region 4.
-    WRITE_MPEG_REG(DI_MC_CTRL, 0x1f);            				// enable region level
+    Wr(DI_MC_CTRL, 0x1f);            				// enable region level
 }
 
 static int fdn[5] = {0};
@@ -1966,10 +1994,10 @@ void read_pulldown_info(pulldown_detect_info_t* field_pd_info,
     int i;
     unsigned long pd_info[6];
     unsigned long tmp;
-    WRITE_MPEG_REG(DI_INFO_ADDR, 0 );
+    Wr(DI_INFO_ADDR, 0 );
     for ( i  = 0; i < 6; i++)
     {
-       	pd_info[i] = READ_MPEG_REG(DI_INFO_DATA);
+       	pd_info[i] = Rd(DI_INFO_DATA);
     }
     memset(field_pd_info, 0, sizeof(pulldown_detect_info_t));
     field_pd_info->field_diff       = pd_info[2];
@@ -2006,19 +2034,19 @@ void read_pulldown_info(pulldown_detect_info_t* field_pd_info,
         memset(&(win_pd_info[i]), 0, sizeof(pulldown_detect_info_t));
     }
     for(i = 0; i< MAX_WIN_NUM; i++){
-        win_pd_info[i].frame_diff = READ_MPEG_REG(DI_INFO_DATA);    
+        win_pd_info[i].frame_diff = Rd(DI_INFO_DATA);    
     }
     for(i = 0; i< MAX_WIN_NUM; i++){
-        win_pd_info[i].field_diff = READ_MPEG_REG(DI_INFO_DATA);    
+        win_pd_info[i].field_diff = Rd(DI_INFO_DATA);    
     }
     for(i = 0; i< MAX_WIN_NUM; i++){
-        tmp = READ_MPEG_REG(DI_INFO_DATA); /* luma */
+        tmp = Rd(DI_INFO_DATA); /* luma */
     }
     for(i = 0; i< MAX_WIN_NUM; i++){
-        win_pd_info[i].frame_diff_num = READ_MPEG_REG(DI_INFO_DATA)&0xffffff;    
+        win_pd_info[i].frame_diff_num = Rd(DI_INFO_DATA)&0xffffff;    
     }
     for(i = 0; i< MAX_WIN_NUM; i++){
-        win_pd_info[i].field_diff_num = (READ_MPEG_REG(DI_INFO_DATA)&0xfffff)<<4;    
+        win_pd_info[i].field_diff_num = (Rd(DI_INFO_DATA)&0xfffff)<<4;    
     }
 }                            
 
@@ -2027,10 +2055,10 @@ void read_mtn_info(unsigned long* mtn_info, unsigned long * reg_mtn_info)
 {
     int i;
 
-    WRITE_MPEG_REG(DI_INFO_ADDR, 64 );
+    Wr(DI_INFO_ADDR, 64 );
     for ( i  = 0; i < 5; i++)
     {
-       	mtn_info[i] = READ_MPEG_REG(DI_INFO_DATA);
+       	mtn_info[i] = Rd(DI_INFO_DATA);
 		    if(di_log_flag&DI_LOG_MTNINFO){
 		        di_print("mtn_info[%d]=%lx \n", 64+i,mtn_info[i]);
 		    }
@@ -2041,14 +2069,41 @@ void read_mtn_info(unsigned long* mtn_info, unsigned long * reg_mtn_info)
 	reg_mtn_info[3] = mtn_info[3];
 	reg_mtn_info[4] = mtn_info[4];
 	
-    WRITE_MPEG_REG(DI_INFO_ADDR, 0 );
-    reg_mtn_info[5] = READ_MPEG_REG(DI_INFO_DATA);
-	reg_mtn_info[6] = READ_MPEG_REG(DI_INFO_DATA);
+    Wr(DI_INFO_ADDR, 0 );
+    reg_mtn_info[5] = Rd(DI_INFO_DATA);
+	reg_mtn_info[6] = Rd(DI_INFO_DATA);
 
 	
 	
     return;
 }
+void di_post_read_reverse(bool reverse)
+{
+    if(reverse) {
+        Wr_reg_bits(DI_IF1_GEN_REG2,    3, 2, 2);
+        Wr_reg_bits(VD1_IF0_GEN_REG2, 0xf, 2, 4);
+        Wr_reg_bits(VD2_IF0_GEN_REG2, 0xf, 2, 4); 
+    } else {
+        Wr_reg_bits(DI_IF1_GEN_REG2,  0, 2, 2);
+	Wr_reg_bits(VD1_IF0_GEN_REG2, 0, 2, 4);
+	Wr_reg_bits(VD2_IF0_GEN_REG2, 0, 2, 4);
+    }
+}
+void di_post_read_reverse_irq(bool reverse)
+{
+    if(reverse) {
+        VSYNC_WR_MPEG_REG_BITS(DI_IF1_GEN_REG2,    3, 2, 2);
+        VSYNC_WR_MPEG_REG_BITS(VD1_IF0_GEN_REG2, 0xf, 2, 4);
+        VSYNC_WR_MPEG_REG_BITS(VD2_IF0_GEN_REG2, 0xf, 2, 4); 
+	VSYNC_WR_MPEG_REG_BITS(DI_MTNRD_CTRL, 0xf, 17,4); 			   
+    } else {
+        VSYNC_WR_MPEG_REG_BITS(DI_IF1_GEN_REG2,  0, 2, 2);
+	VSYNC_WR_MPEG_REG_BITS(VD1_IF0_GEN_REG2, 0, 2, 4);
+	VSYNC_WR_MPEG_REG_BITS(VD2_IF0_GEN_REG2, 0, 2, 4);
+	VSYNC_WR_MPEG_REG_BITS(DI_MTNRD_CTRL, 0, 17,4);
+    }
+}
+
 
 #ifdef DI_POST_SKIP_LINE
 MODULE_PARM_DESC(di_vscale_skip_mode, "\n di_vscale_skip_mode\n");

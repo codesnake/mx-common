@@ -34,6 +34,7 @@
 #define PORT_FLAG_AID       0x0010
 #define PORT_FLAG_SID       0x0020
 #define PORT_FLAG_UD       0x0040
+#define PORT_FLAG_DRM       0x0080
 #define PORT_FLAG_ID        (PORT_FLAG_VID | PORT_FLAG_AID | PORT_FLAG_SID | PORT_FLAG_UD)
 #define PORT_FLAG_INITED    0x100
 
@@ -141,9 +142,7 @@
 #define AMSTREAM_IOC_SET_FREERUN_MODE  _IOW(AMSTREAM_IOC_MAGIC, 0x88, unsigned long)
 #define AMSTREAM_IOC_SET_VSYNC_UPINT   _IOW(AMSTREAM_IOC_MAGIC, 0x89, unsigned long)
 #define AMSTREAM_IOC_SET_DEMUX  _IOW(AMSTREAM_IOC_MAGIC, 0x90, unsigned long)
-
-
-
+#define AMSTREAM_IOC_SET_DRMMODE _IOW(AMSTREAM_IOC_MAGIC, 0x91, unsigned long)
 
 #define AMSTREAM_IOC_SET_VIDEO_DELAY_LIMIT_MS _IOW(AMSTREAM_IOC_MAGIC, 0xa0, unsigned long)
 #define AMSTREAM_IOC_GET_VIDEO_DELAY_LIMIT_MS _IOR(AMSTREAM_IOC_MAGIC, 0xa1, unsigned long)
@@ -153,6 +152,20 @@
 #define AMSTREAM_IOC_GET_VIDEO_CUR_DELAY_MS _IOR(AMSTREAM_IOC_MAGIC, 0xa5, unsigned long)
 #define AMSTREAM_IOC_GET_AUDIO_AVG_BITRATE_BPS _IOR(AMSTREAM_IOC_MAGIC, 0xa6, unsigned long)
 #define AMSTREAM_IOC_GET_VIDEO_AVG_BITRATE_BPS _IOR(AMSTREAM_IOC_MAGIC, 0xa7, unsigned long)
+#define AMSTREAM_IOC_SET_APTS                  _IOW(AMSTREAM_IOC_MAGIC, 0xa8, unsigned long)                
+       
+#define AMSTREAM_IOC_GET_LAST_CHECKIN_APTS   _IOR(AMSTREAM_IOC_MAGIC, 0xa9, unsigned long)
+#define AMSTREAM_IOC_GET_LAST_CHECKIN_VPTS   _IOR(AMSTREAM_IOC_MAGIC, 0xaa, unsigned long)
+#define AMSTREAM_IOC_GET_LAST_CHECKOUT_APTS  _IOR(AMSTREAM_IOC_MAGIC, 0xab, unsigned long)
+#define AMSTREAM_IOC_GET_LAST_CHECKOUT_VPTS  _IOR(AMSTREAM_IOC_MAGIC, 0xac, unsigned long)
+
+//subtitle.c get/set subtitle info
+#define AMSTREAM_IOC_GET_SUBTITLE_INFO       _IOR(AMSTREAM_IOC_MAGIC, 0xad, unsigned long)
+#define AMSTREAM_IOC_SET_SUBTITLE_INFO       _IOW(AMSTREAM_IOC_MAGIC, 0xae, unsigned long)
+
+/*add for gstreamer fast/slow forward*/
+#define AMSTREAM_IOC_SET_PLAYRATE    _IOW(AMSTREAM_IOC_MAGIC, 0xb0, unsigned long)
+
 
 #define TRICKMODE_NONE       0x00
 #define TRICKMODE_I          0x01

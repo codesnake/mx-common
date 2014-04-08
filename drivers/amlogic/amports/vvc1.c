@@ -298,9 +298,6 @@ static void vvc1_isr(void)
 
         intra_output = 1;
 
-        if (picture_type == B_PICTURE) {
-            pts_valid = 0;
-        }
 
 #ifdef DEBUG_PTS
         if (picture_type == I_PICTURE) {
@@ -339,7 +336,7 @@ static void vvc1_isr(void)
                         frm.start_pts = pts;
                         frm.state = RATE_MEASURE_END_PTS;
                         if(frm.trymax < 60*10)/*60 fps*60 S */
-                            frm.trymax = frm.trymax<<1;
+                            frm.trymax = RATE_MEASURE_NUM;
                         frm.num = 0; 
                     }
                 }
