@@ -550,18 +550,10 @@ static const reg_t tvregs_576cvbs[] = {
     {VENC_VDAC_DACSEL3,               0x0000,    },
     {VENC_VDAC_DACSEL4,               0x0000,    },
     {VENC_VDAC_DACSEL5,               0x0000,    },
-    {VPU_VIU_VENC_MUX_CTRL,           0x0005,    },
     {VENC_VDAC_FIFO_CTRL,             0x2000,    },
     {ENCI_DACSEL_0,                   0x1111     },
     {ENCI_DACSEL_1,                   0x11       },
-    {ENCP_VIDEO_EN,                   0,         },
     {ENCI_VIDEO_EN,                   1,         },
-    {VENC_VDAC_SETTING,				  0x5		 },
-    {VENC_VDAC_DAC1_GAINCTRL,		  0x1b		 },
-    {ENCI_YC_DELAY,					  0x333		 },
-    {ENCI_VIDEO_SAT,				  0x5		 },
-    {VENC_VDAC_DAC1_FILT_CTRL0,		  0x1		 },
-    {VENC_VDAC_DAC1_FILT_CTRL1,		  0xfc48	 },
     {MREG_END_MARKER,                 0          }
 };
 
