@@ -13,6 +13,13 @@
 #define init_MUTEX(sem)             sema_init(sem, 1)
 #endif
 
+/***default disable MX RevD support***/
+#define	MX_REVD
+
+#ifdef MX_REVD
+#define	NAND_PAGELIST_MAGIC 	0x4c50414e
+#endif
+
 /** Register defination **/
 
 #define NAND_SYS_CLK_NAME	  "clk81"
@@ -25,6 +32,17 @@
 #define M3_BOOT_WRITE_SIZE	  		0x600
 #define M3_BOOT_COPY_NUM	  		4
 #define M3_BOOT_PAGES_PER_COPY	 	256
+
+#ifdef CONFIG_SECURE_NAND
+
+#define NAND_SECURE_BLK    			2
+#define SECURE_STORE_MAGIC		0x9fe7d05c
+#define REMAIN_BLOCK_NUM 			4
+#define	NAND_SEC_MAX_BLK_NUM   4
+
+#define CONFIG_SECURE_SIZE         		(0x10000*2)
+#define SECURE_SIZE (CONFIG_SECURE_SIZE - (sizeof(uint32_t)))
+#endif
 
 #define NFC_BASE			  CBUS_REG_ADDR(NAND_CMD)
 #define NFC_OFF_CMD           ((NAND_CMD -NAND_CMD)<<2)
@@ -182,7 +200,7 @@
 #define NFC_SEND_CMD_DWR(data)              NFC_SEND_CMD(DWR     |(data&0xff  ))
 #define NFC_SEND_CMD_DRD(    )              NFC_SEND_CMD(DRD                   )
 */
-#define NFC_SEND_CMD_IDLE(ce,time)          NFC_SEND_CMD(NFC_CMD_IDLE(ce,time))
+#define NFC_SEND_CMD_IDLE(ce,time)          {while(NFC_CMDFIFO_SIZE()>0);NFC_SEND_CMD(NFC_CMD_IDLE(ce,time));}
 #define NFC_SEND_CMD_CLE(ce,cmd  )          NFC_SEND_CMD(NFC_CMD_CLE(ce,cmd))
 #define NFC_SEND_CMD_ALE(ce,addr )          NFC_SEND_CMD(NFC_CMD_ALE(ce,addr))
 #define NFC_SEND_CMD_STANDBY(time)          NFC_SEND_CMD(NFC_CMD_STANDBY(time))
@@ -316,11 +334,13 @@
 #define MTD_PART_MAGIC					"anpt"
 
 #define CONFIG_ENV_SIZE         		0x8000
+
 #define ENV_SIZE (CONFIG_ENV_SIZE - (sizeof(uint32_t)))
 #define NAND_SYS_PART_SIZE				0x10000000
 
 #define ENV_NAND_SCAN_BLK                            50
 
+#ifdef CONFIG_AML_NAND_KEY
 #define NAND_MINIKEY_PART_SIZE				0x800000
 #define NAND_MINIKEY_PART_NUM				4
 //#define NAND_MINIKEY_PART_BLOCKNUM			CONFIG_NAND_KEY_BLOCK_NUM
@@ -328,8 +348,9 @@
 //#define CONFIG_KEYSIZE         		(0x4000*1)
 #define CONFIG_KEYSIZE         		(0x4000*4)
 #define ENV_KEY_MAGIC					"keyx"
-
+#define REMAIN_TAIL_BLOCK_NUM		8
 #define NAND_KEY_SAVE_MULTI_BLOCK  //key save in multi block same time
+#endif
 
 struct aml_nand_flash_dev {
 	char *name;
@@ -359,6 +380,7 @@ struct aml_nand_bbt_info {
 	struct aml_nand_part_info aml_nand_part[MAX_MTD_PART_NUM];
 	char bbt_tail_magic[4];
 };
+#ifdef CONFIG_AML_NAND_KEY
 struct aml_nandkey_info_t {
          struct mtd_info *mtd;
          struct env_valid_node_t *env_valid_node;
@@ -370,15 +392,30 @@ struct aml_nandkey_info_t {
          int start_block;
          int end_block;
 };
+#endif
+#ifdef CONFIG_SECURE_NAND
+struct aml_nandsecure_info_t{
+	struct mtd_info *mtd;
+	 struct env_valid_node_t *secure_valid_node;
+	 struct env_free_node_t *secure_free_node;
+	 u_char secure_valid;
+	 u_char secure_init;
+	 u_char part_num_before_sys;
+	 int start_block;
+	 int end_block;
+};
+#endif
 
 struct env_valid_node_t {
 	int16_t  ec;
 	int16_t	phy_blk_addr;
 	int16_t	phy_page_addr;
 	int timestamp;
+#ifdef CONFIG_AML_NAND_KEY
 #ifdef NAND_KEY_SAVE_MULTI_BLOCK
 	int rd_flag;
 	struct env_valid_node_t *next;
+#endif
 #endif
 };
 
@@ -410,6 +447,18 @@ typedef	struct environment_s {
 	uint32_t	crc;		/* CRC32 over data bytes	*/
 	unsigned char	data[ENV_SIZE]; /* Environment data		*/
 } env_t;
+
+#ifdef CONFIG_SECURE_NAND
+typedef	struct {
+	uint32_t	crc;		/* CRC32 over data bytes	*/
+	unsigned char	data[SECURE_SIZE]; /* Environment data		*/
+} secure_t;
+
+struct secure_oobinfo_t {
+	int  name;
+    unsigned       timestamp;
+};
+#endif
 
 struct aml_nand_bch_desc{
     char * name;
@@ -449,7 +498,7 @@ struct aml_nand_bch_desc{
 #define RETRY_NAND_COPY_NUM	4
 
 #define	READ_RETRY_REG_NUM   	8
-#define	READ_RETRY_CNT   		20
+#define	READ_RETRY_CNT   		30
 
 
 #define	ENHANCE_SLC_REG_NUM   	5
@@ -475,6 +524,7 @@ struct aml_nand_bch_desc{
 #define	HYNIX_20NM_LGA_8GB 		5		//
 //for Toshiba
 #define	TOSHIBA_24NM 			20		//TC58NVG5D2HTA00
+#define	TOSHIBA_A19NM 			21	
 										//TC58NVG6D2GTA00
 //for SAMSUNG
 #define	SUMSUNG_2XNM 			30	
@@ -483,6 +533,8 @@ struct aml_nand_bch_desc{
 
 //for SANDISK
 #define    SANDISK_19NM			50
+#define     SANDISK_24NM			51
+#define     SANDISK_A19NM		52
 
 #define      DYNAMIC_REG_NUM        3
 #define      DYNAMIC_REG_INIT_NUM        9
@@ -498,6 +550,8 @@ struct aml_nand_bch_desc{
 #define	NAND_CMD_SANDISK_INIT_ONE				0x3B
 #define	NAND_CMD_SANDISK_INIT_TWO				0xB9
 
+#define	NAND_CMD_SANDISK_DSP_ON					0x26
+#define	NAND_CMD_SANDISK_RETRY_STA					 0x5D
 #define	NAND_CMD_SANDISK_LOAD_VALUE_ONE			0x53
 #define	NAND_CMD_SANDISK_LOAD_VALUE_TWO			0x54
 
@@ -615,7 +669,7 @@ struct aml_nand_chip {
 	u8 ecc_cnt_cur;
 	u8 ecc_max;
 	unsigned int 		 toggle_mode;
-   	 unsigned zero_cnt;
+    unsigned zero_cnt;
 	unsigned oob_fill_cnt;
 	struct mtd_info			mtd;
 	struct nand_chip		chip;
@@ -633,10 +687,14 @@ struct aml_nand_chip {
 	/* nand env device */
 	struct cdev				nand_env_cdev;
 
-	
+#ifdef CONFIG_AML_NAND_KEY
 	struct aml_nandkey_info_t *aml_nandkey_info;
 	struct cdev				nand_key_cdev;
-
+#endif
+#ifdef CONFIG_SECURE_NAND
+	struct aml_nandsecure_info_t *aml_nandsecure_info;
+	struct cdev				nand_secure_cdev;
+#endif
 
 	struct early_suspend nand_early_suspend;
     struct class      cls;
@@ -690,6 +748,10 @@ static pinmux_item_t nand_set_pins[] = {
        .reg = PINMUX_REG(5),
        .clrmask = ((1<<0) | (1<<1) | (1<<2) | (1<<3)),
     },	
+	{//sdio c
+	   .reg = PINMUX_REG(6),
+	   .clrmask = (0x3f<<24),
+	},
     PINMUX_END_ITEM
 };
 
