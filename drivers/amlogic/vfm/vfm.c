@@ -254,11 +254,21 @@ static void vfm_init(void)
 {
 
 #ifdef CONFIG_POST_PROCESS_MANAGER
+#ifdef CONFIG_DEINTERLACE
+    char def_id[] = "default";
+    char def_name_chain[] = "decoder ppmgr deinterlace amvideo";
+#else
     char def_id[] = "default";
     char def_name_chain[] = "decoder ppmgr amvideo";
+#endif
+#else
+#ifdef CONFIG_DEINTERLACE
+    char def_id[] = "default";
+    char def_name_chain[] = "decoder deinterlace amvideo";
 #else
     char def_id[] = "default";
     char def_name_chain[] = "decoder amvideo";
+#endif
 #endif    
 #ifdef CONFIG_TVIN_VIUIN
     char def_ext_id[] = "default_ext";
