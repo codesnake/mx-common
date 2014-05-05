@@ -127,18 +127,11 @@ typedef		__s64		int64_t;
 #define aligned_le64 __le64 __attribute__((aligned(8)))
 
 /**
- * The type used for indexing onto a disc or disc partition.
- *
- * Linux always considers sectors to be 512 bytes long independently
- * of the devices real block size.
- *
  * blkcnt_t is the type of the inode's block count.
  */
 #ifdef CONFIG_LBDAF
-typedef u64 sector_t;
 typedef u64 blkcnt_t;
 #else
-typedef unsigned long sector_t;
 typedef unsigned long blkcnt_t;
 #endif
 
@@ -157,6 +150,18 @@ typedef u32 dma_addr_t;
 #endif /* dma_addr_t */
 
 #endif /* __KERNEL__ */
+
+/**
+ * The type used for indexing onto a disc or disc partition.
+ *
+ * Linux always considers sectors to be 512 bytes long independently
+ * of the devices real block size.
+ */
+#ifdef CONFIG_LBDAF
+typedef u64 sector_t;
+#else
+typedef unsigned long sector_t;
+#endif
 
 /*
  * Below are truly Linux-specific types that should never collide with
