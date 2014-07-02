@@ -679,11 +679,6 @@ void tsync_avevent_locked(avevent_t event, u32 param)
         }
         apause_flag = 0;
         timestamp_apts_start(0);
-        //reset discontinue var
-        tsync_set_sync_adiscont(0);
-        tsync_set_sync_adiscont_diff(0);
-        tsync_set_sync_vdiscont(0);
-        tsync_set_sync_vdiscont_diff(0);
         break;
 
     case AUDIO_PAUSE:

@@ -3,15 +3,9 @@
 #include <linux/kernel.h>
 #include <linux/device.h>
 #include <linux/vmalloc.h>
-#include <linux/major.h>
-#include <linux/fs.h>
-#include <linux/interrupt.h>
-#include <linux/amports/amstream.h>
 
 #include <linux/amlog.h>
 MODULE_AMLOG(AMLOG_DEFAULT_LEVEL, 0, LOG_DEFAULT_LEVEL_DESC, LOG_DEFAULT_MASK_DESC);
-#define DEVICE_NAME "amsubtitle"	/* Dev name as it appears in /proc/devices   */
-static int subdevice_open = 0;
 
 #define MAX_SUBTITLE_PACKET 10
 
@@ -38,30 +32,6 @@ static int subtitle_fps = 0;
 static int subtitle_subtype = 0;
 static int subtitle_reset = 0;
 //static int *subltitle_address[MAX_SUBTITLE_PACKET];
-
-typedef enum {
-    SUB_NULL = -1,
-    SUB_ENABLE = 0,
-    SUB_TOTAL,
-    SUB_WIDTH,
-    SUB_HEIGHT,
-    SUB_TYPE,
-    SUB_CURRENT,
-    SUB_INDEX,
-    SUB_WRITE_POS,
-    SUB_START_PTS,
-    SUB_FPS,
-    SUB_SUBTYPE,
-    SUB_RESET,
-    SUB_DATA_T_SIZE,
-    SUB_DATA_T_DATA
-}subinfo_para_type;
-
-typedef struct {
-    subinfo_para_type subinfo_type;
-    int subtitle_info;
-    char *data;
-} subinfo_para_t;
 
 // total
 // curr
@@ -438,200 +408,24 @@ static struct class subtitle_class = {
         .class_attrs = subtitle_class_attrs,
     };
 
-/*********************************************************
- * /dev/amvideo APIs
- *********************************************************/
-static int amsubtitle_open(struct inode *inode, struct file *file)
-{	
-    if (subdevice_open)
-        return -EBUSY;
-	
-	subdevice_open++;
-
-    try_module_get(THIS_MODULE);
-	
-    return 0;
-}
-
-static int amsubtitle_release(struct inode *inode, struct file *file)
-{
-    subdevice_open--;
-	
-    module_put(THIS_MODULE);
-	
-    return 0;
-}
-
-static long amsubtitle_ioctl(struct file *file,
-                          unsigned int cmd, ulong arg)
-{
-    switch (cmd) {
-    case AMSTREAM_IOC_GET_SUBTITLE_INFO: {
-            subinfo_para_t *states = (void *)arg;
-			
-            switch(states->subinfo_type) {
-            case SUB_ENABLE:
-                states->subtitle_info = subtitle_enable;
-                break;
-            case SUB_TOTAL:
-                states->subtitle_info = subtitle_total;
-                break;
-            case SUB_WIDTH:
-                states->subtitle_info = subtitle_width;
-                break;
-            case SUB_HEIGHT:
-                states->subtitle_info = subtitle_height;
-                break;
-            case SUB_TYPE:
-                states->subtitle_info = subtitle_type;
-                break;
-            case SUB_CURRENT:
-                states->subtitle_info = subtitle_current;
-                break;
-            case SUB_INDEX:
-                states->subtitle_info = subtitle_index;
-                break;
-            case SUB_WRITE_POS:
-                states->subtitle_info = subtitle_write_pos;
-                break;
-            case SUB_START_PTS:
-                states->subtitle_info = subtitle_start_pts;
-                break;
-            case SUB_FPS:
-                states->subtitle_info = subtitle_fps;
-                break;
-            case SUB_SUBTYPE:
-                states->subtitle_info = subtitle_subtype;
-                break;
-            case SUB_RESET:
-                states->subtitle_info = subtitle_reset;
-                break;
-            case SUB_DATA_T_SIZE:
-	            states->subtitle_info = subtitle_data[subtitle_write_pos].subtitle_size;
-                break;
-            case SUB_DATA_T_DATA: {
-                    if (states->subtitle_info > 0) {
-						states->subtitle_info = subtitle_data[subtitle_write_pos].data;
-                    }
-				}
-                break;
-            default:
-		        break;
-            }
-        }
-
-		break;
-	case AMSTREAM_IOC_SET_SUBTITLE_INFO: {
-            subinfo_para_t *states = (void *)arg;
-            switch(states->subinfo_type) {
-            case SUB_ENABLE:
-                subtitle_enable = states->subtitle_info;
-                break;
-            case SUB_TOTAL:
-                subtitle_total = states->subtitle_info;
-                break;
-            case SUB_WIDTH:
-                subtitle_width = states->subtitle_info;
-                break;
-            case SUB_HEIGHT:
-                subtitle_height = states->subtitle_info;
-                break;
-            case SUB_TYPE:
-                subtitle_type = states->subtitle_info;
-                break;
-            case SUB_CURRENT:
-                subtitle_current = states->subtitle_info;
-                break;
-            case SUB_INDEX:
-                subtitle_index = states->subtitle_info;
-                break;
-            case SUB_WRITE_POS:
-                subtitle_write_pos = states->subtitle_info;
-                break;
-            case SUB_START_PTS:
-                subtitle_start_pts = states->subtitle_info;
-                break;
-            case SUB_FPS:
-                subtitle_fps = states->subtitle_info;
-                break;
-            case SUB_SUBTYPE:
-                subtitle_subtype = states->subtitle_info;
-                break;
-            case SUB_RESET:
-                subtitle_reset = states->subtitle_info;
-                break;
-            case SUB_DATA_T_SIZE:
-	            subtitle_data[subtitle_write_pos].subtitle_size = states->subtitle_info;
-                break;
-            case SUB_DATA_T_DATA: {
-                    if (states->subtitle_info > 0) {
-                        subtitle_data[subtitle_write_pos].data = vmalloc((states->subtitle_info));
-                        if (subtitle_data[subtitle_write_pos].data)
-                            memcpy(subtitle_data[subtitle_write_pos].data, (char *)states->data,
-                                states->subtitle_info);
-                    }
-
-                    subtitle_write_pos++;
-                    if (subtitle_write_pos >= MAX_SUBTITLE_PACKET) {
-                        subtitle_write_pos = 0;
-                    }
-                }
-                break;
-            default:
-		        break;
-            }
-        }
-
-        break;
-	default:
-		break;
-    }
-
-    return 0;
-}
-
-const static struct file_operations amsubtitle_fops = {
-    .owner    = THIS_MODULE,
-    .open     = amsubtitle_open,
-    .release  = amsubtitle_release,
-    .unlocked_ioctl    = amsubtitle_ioctl,
-};
-
-static struct device *amsubtitle_dev;
-
 static int __init subtitle_init(void)
 {
     int r;
 
     r = class_register(&subtitle_class);
+
     if (r) {
         amlog_level(LOG_LEVEL_ERROR, "subtitle class create fail.\n");
         return r;
     }
 
-	r = register_chrdev(AMSUBTITLE_MAJOR, DEVICE_NAME, &amsubtitle_fops);
-	if (r < 0) {
-		printk("Can't register major for amsubtitle device %d\n", r);
-		return r;
-	}
-	
-    amsubtitle_dev = device_create(&subtitle_class, NULL,
-                                MKDEV(AMSUBTITLE_MAJOR, 0), NULL,
-                                DEVICE_NAME);
-
-    if (IS_ERR(amsubtitle_dev)) {
-        amlog_level(LOG_LEVEL_ERROR, "## Can't create amsubtitle device\n");
-		unregister_chrdev(AMSUBTITLE_MAJOR, DEVICE_NAME);
-		return -1;
-    }
 
     return (0);
 }
 
 static void __exit subtitle_exit(void)
 {
-    class_unregister(&subtitle_class);	
-    unregister_chrdev(AMSUBTITLE_MAJOR, DEVICE_NAME);
+    class_unregister(&subtitle_class);
 }
 
 module_init(subtitle_init);

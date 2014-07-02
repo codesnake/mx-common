@@ -26,7 +26,6 @@
 #include <linux/amports/vframe_provider.h>
 #include <linux/amports/vframe_receiver.h>
 #include "vdec_reg.h"
-#include <linux/delay.h>
 
 #define ENC_CANVAS_OFFSET  AMVENC_CANVAS_INDEX
 
@@ -93,8 +92,6 @@ static u32 quant = 28;
 static u32 encoder_width = 1280;
 static u32 encoder_height = 720;
 static void avc_prot_init(void);
-static s32 avc_poweron(void);
-static void dma_flush(unsigned buf_start , unsigned buf_size );
 //static void avc_local_init(void);
 static int idr_pic_id = 0;  //need reset as 0 for IDR
 static u32 frame_number = 0 ;   //need plus each frame
@@ -105,8 +102,6 @@ static u32 log2_max_frame_num =4 ;
 static u32 anc0_buffer_id =0;
 static u32 qppicture  =26;
 static u32 process_irq = 0;
-static int encode_inited = 0;
-static int encode_opened = 0;
 
 static const char avc_dec_id[] = "avc-dev";
 
@@ -552,19 +547,22 @@ static void avc_prot_init(void)
       case 50 : p_pic_qp_c = 39; break;
     default : p_pic_qp_c = 39; break; // should only be 51 or more (when index_offset)
     }
-    WRITE_HREG(QDCT_Q_QUANT_I,
-                (i_pic_qp_c<<22) | 
+	WRITE_HREG(QDCT_Q_QUANT_I,
+				(i_pic_qp_c<<22) | 
                 (i_pic_qp<<16) | 
                 ((i_pic_qp_c%6)<<12)|((i_pic_qp_c/6)<<8)|((i_pic_qp%6)<<4)|((i_pic_qp/6)<<0));	
 
    WRITE_HREG(QDCT_Q_QUANT_P,                
-                (p_pic_qp_c<<22) | 
+				(p_pic_qp_c<<22) | 
                 (p_pic_qp<<16) | 
                 ((p_pic_qp_c%6)<<12)|((p_pic_qp_c/6)<<8)|((p_pic_qp%6)<<4)|((p_pic_qp/6)<<0));	
 
-   //avc_init_input_buffer();
 
-   WRITE_HREG(IGNORE_CONFIG , 
+
+	//avc_init_input_buffer();
+
+
+    WRITE_HREG(IGNORE_CONFIG , 
                 (1<<31) | // ignore_lac_coeff_en
                 (1<<26) | // ignore_lac_coeff_else (<1)
                 (1<<21) | // ignore_lac_coeff_2 (<1)
@@ -572,19 +570,21 @@ static void avc_prot_init(void)
                 (1<<15) | // ignore_cac_coeff_en
                 (1<<10) | // ignore_cac_coeff_else (<1)
                 (1<<5)  | // ignore_cac_coeff_2 (<1)
-                (2<<0));    // ignore_cac_coeff_1 (<2)
+                (2<<0))    // ignore_cac_coeff_1 (<2)
+                ; 
 
     WRITE_HREG(IGNORE_CONFIG_2,
                 (1<<31) | // ignore_t_lac_coeff_en
                 (1<<26) | // ignore_t_lac_coeff_else (<1)
                 (1<<21) | // ignore_t_lac_coeff_2 (<1)
                 (5<<16) | // ignore_t_lac_coeff_1 (<5)
-                (0<<0));
+                (0<<0))
+                ; 
 
     WRITE_HREG(QDCT_MB_CONTROL,
                 (1<<9) | // mb_info_soft_reset
-                (1<<0)); // mb read buffer soft reset
-
+                (1<<0) ) // mb read buffer soft reset
+              ;
     WRITE_HREG(QDCT_MB_CONTROL,
               (0<<28) | // ignore_t_p8x8
               (0<<27) | // zero_mc_out_null_non_skipped_mb
@@ -603,10 +603,8 @@ static void avc_prot_init(void)
               (1<<10) | // mb_info_en
               (avc_endian<<3) | // endian
               (1<<1) | // mb_read_en
-              (0<<0));   // soft reset
-
-
-    WRITE_HREG(CURR_CANVAS_CTRL,0);
+              (0<<0))   // soft reset
+            ; // soft reset
     //debug_level(0,"current endian is %d \n" , avc_endian);
     data32 = READ_HREG(VLC_CONFIG);
     data32 = data32 | (1<<0); // set pop_coeff_even_all_zero
@@ -632,7 +630,6 @@ void amvenc_reset(void)
     READ_VREG(DOS_SW_RESET1);
 
 }
-
 void amvenc_start(void)
 {
     READ_VREG(DOS_SW_RESET1);
@@ -672,6 +669,64 @@ void amvenc_stop(void)
     READ_VREG(DOS_SW_RESET1);
 }
 
+
+#if 0
+static void *mc_addr=NULL;
+static dma_addr_t mc_addr_map;
+#define MC_SIZE (4096 * 4)
+
+s32 amvenc_loadmc(const u32 *p)
+{
+    ulong timeout;
+    s32 ret = 0;
+    return ret;
+	if(mc_addr==NULL)
+	{
+		mc_addr = kmalloc(MC_SIZE, GFP_KERNEL);
+		printk("Alloc new mc addr to %p\n",mc_addr);
+	}
+    if (!mc_addr) {
+        return -ENOMEM;
+    }
+
+    memcpy(mc_addr, p, MC_SIZE);
+    printk("address 0 is 0x%x\n", *((u32*)mc_addr));
+    printk("address 1 is 0x%x\n", *((u32*)mc_addr + 1));
+    printk("address 2 is 0x%x\n", *((u32*)mc_addr + 2));
+    printk("address 3 is 0x%x\n", *((u32*)mc_addr + 3));
+
+    mc_addr_map = dma_map_single(NULL, mc_addr, MC_SIZE, DMA_TO_DEVICE);
+	printk("mc_addr_map is 0x%x\n" ,mc_addr_map);
+    WRITE_HREG(MPSR, 0);
+    WRITE_HREG(CPSR, 0);
+
+    /* Read CBUS register for timing */
+    timeout = READ_HREG(MPSR);
+    timeout = READ_HREG(MPSR);
+
+    timeout = jiffies + HZ;
+
+    WRITE_HREG(IMEM_DMA_ADR, mc_addr_map);
+    WRITE_HREG(IMEM_DMA_COUNT, 0x1000);
+    WRITE_HREG(IMEM_DMA_CTRL, (0x8000 |  (7 << 16)));
+
+    while (READ_HREG(IMEM_DMA_CTRL) & 0x8000) {
+        if (time_before(jiffies, timeout)) {
+            schedule();
+        } else {
+            printk("hcodec load mc error\n");
+            ret = -EBUSY;
+            break;
+        }
+    }
+
+    dma_unmap_single(NULL, mc_addr_map, MC_SIZE, DMA_TO_DEVICE);
+	kfree(mc_addr);
+	mc_addr=NULL;	
+
+    return ret;
+}
+#else
 static void __iomem *mc_addr=NULL;
 static unsigned mc_addr_map;
 #define MC_SIZE (4096 * 4)
@@ -714,7 +769,7 @@ s32 amvenc_loadmc(const u32 *p)
 
     return ret;
 }
-
+#endif
 #define  DMC_SEC_PORT8_RANGE0  0x840
 #define  DMC_SEC_CTRL  0x829
 void enable_hcoder_ddr_access(void)
@@ -723,25 +778,16 @@ void enable_hcoder_ddr_access(void)
 	WRITE_SEC_REG(DMC_SEC_CTRL , 0x80000000);
 }
 
-static s32 avc_poweron(void)
+static s32 avc_check(void)
 {
 	enable_hcoder_ddr_access();
-	// Enable Dos internal clock gating
 	hvdec_clock_enable();
-	mdelay(10);
-	return 0;
-}
-
-static s32 avc_poweroff(void)
-{
-	hvdec_clock_disable();
 	return 0;
 }
 
 static s32 avc_init(void)
 {
     int r;   
-    avc_poweron();
     avc_canvas_init();
     WRITE_HREG(HCODEC_ASSIST_MMC_CTRL1,0x2);
     debug_level(1,"start to load microcode\n");
@@ -756,24 +802,23 @@ static s32 avc_init(void)
     frame_number = 0 ;
     process_irq = 0;
     pic_order_cnt_lsb = 0 ;
-    encoder_status = ENCODER_IDLE ;
     amvenc_reset();
     avc_init_encoder(); 
     avc_init_input_buffer();  //dct buffer setting
     avc_init_output_buffer();  //output stream buffer
     avc_prot_init();
-    r = request_irq(INT_AMVENCODER, enc_isr, IRQF_SHARED, "enc-irq", (void *)avc_dec_id);//INT_MAILBOX_1A
+    r = request_irq(INT_MAILBOX_1A, enc_isr, IRQF_SHARED, "enc-irq", (void *)avc_dec_id);	
     avc_init_dblk_buffer(dblk_buf_canvas);   //decoder buffer , need set before each frame start
     avc_init_reference_buffer(ref_buf_canvas); //reference  buffer , need set before each frame start
     avc_init_assit_buffer(); //assitant buffer for microcode
-    WRITE_HREG(ENCODER_STATUS , ENCODER_IDLE);
     amvenc_start();
-    encode_inited = 1;
     return 0;
 }
 
-void amvenc_avc_start_cmd(int cmd, unsigned* input_info)
+void amvenc_avc_start_cmd(int cmd)
 {
+	//int status= 0;
+	//int need_start_cpu = 0;
 	if((cmd == ENCODER_IDR)||(cmd == ENCODER_SEQUENCE)){
 		pic_order_cnt_lsb = 0;	
 		frame_number = 0;
@@ -781,25 +826,20 @@ void amvenc_avc_start_cmd(int cmd, unsigned* input_info)
 
 	if(frame_number > 65535){
 		frame_number = 0;
-	}
-#if 0
-	if((idr_pic_id == 0)&&(cmd == ENCODER_IDR))
-		frame_start = 1;
-#endif
-
+	}	
 	if(frame_start){
 		frame_start = 0;
+		if(cmd != ENCODER_NON_IDR){
+			idr_pic_id ++;
+		}
+		if(idr_pic_id > 255){
+			idr_pic_id = 0;
+		}		
 		encoder_status = ENCODER_IDLE ;
 		//WRITE_HREG(HENC_SCRATCH_3,0);  //mb count 
 		//WRITE_HREG(VLC_TOTAL_BYTES ,0); //offset in bitstream buffer
 		amvenc_reset();
 		avc_init_encoder();
-		if(cmd == ENCODER_IDR){
-			idr_pic_id ++;
-		}
-		if(idr_pic_id > 65535){
-			idr_pic_id = 0;
-		}
 		avc_init_input_buffer();
 		avc_init_output_buffer();		
 		avc_prot_init();
@@ -808,7 +848,6 @@ void amvenc_avc_start_cmd(int cmd, unsigned* input_info)
 	}
 	avc_init_dblk_buffer(dblk_buf_canvas);   
 	avc_init_reference_buffer(ref_buf_canvas); 
-	encoder_status = cmd;
 	WRITE_HREG(ENCODER_STATUS , cmd);
 	if((cmd == ENCODER_IDR)||(cmd == ENCODER_NON_IDR)){
 		process_irq = 0;
@@ -820,38 +859,25 @@ void amvenc_avc_stop(void)
 {
 	//WRITE_HREG(MPSR, 0);	
 	amvenc_stop();
-	avc_poweroff();
 	debug_level(1,"amvenc_avc_stop\n");
 }
 static int amvenc_avc_open(struct inode *inode, struct file *file)
 {
     int r = 0;
     debug_level(1,"avc open\n");
-    if(encode_opened>0){
-        debug_level(1, "amvenc_avc open busy.\n");
-        return -EBUSY;
-    }
-    encode_opened++;
-#if 0
-    if (avc_poweron() < 0) {
+    if (avc_check() < 0) {
         amlog_level(LOG_LEVEL_ERROR, "amvenc_avc init failed.\n");
-        encode_opened--;
+
         return -ENODEV;
     }
-#endif
     return r;
 }
 
 static int amvenc_avc_release(struct inode *inode, struct file *file)
 {
-    if(encode_inited){
-        free_irq(INT_AMVENCODER, (void *)avc_dec_id);
-        //amvdec_disable();
-        amvenc_avc_stop();
-        encode_inited = 0;
-    }
-    if(encode_opened>0)
-        encode_opened--;
+    free_irq(INT_MAILBOX_1A, (void *)avc_dec_id);
+    //amvdec_disable();
+    amvenc_avc_stop();
     debug_level(1,"avc release\n");
     return 0;
 }
@@ -889,12 +915,13 @@ static long amvenc_avc_ioctl(struct file *file,
 		break;    
 	case AMVENC_AVC_IOC_NEW_CMD:
 		amrisc_cmd = *((unsigned*)arg) ;
-		amvenc_avc_start_cmd(amrisc_cmd, NULL);
+		amvenc_avc_start_cmd(amrisc_cmd);
 		break;
 	case AMVENC_AVC_IOC_GET_STAGE:
 		*((unsigned*)arg)  = encoder_status;
 		break; 
 	case AMVENC_AVC_IOC_GET_OUTPUT_SIZE:	
+		//offset = READ_HREG(VLC_TOTAL_BYTES);
 		*((unsigned*)arg) = READ_HREG(VLC_TOTAL_BYTES);
 		break;
 	case AMVENC_AVC_IOC_SET_QUANT:
@@ -973,11 +1000,7 @@ static long amvenc_avc_ioctl(struct file *file,
 		addr_info[11] = gAmvencbuff.bufspec->bitstream.buf_start;
 		addr_info[12] = gAmvencbuff.bufspec->bitstream.buf_size;
 		break;
-	case AMVENC_AVC_IOC_GET_DEVINFO:
-		strncpy((char *)arg,AMVENC_DEV_VERSION,strlen(AMVENC_DEV_VERSION));
-		break;
 	default:
-		r= -1;
 		break;
     }
     return r;

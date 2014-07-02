@@ -173,14 +173,8 @@ static int tsdemux_free_irq(void)
 
 static int tsdemux_set_vid(int vpid)
 {
-    static int cur_vpid = -1;
     unsigned long flags;
     int r = 0;
-
-    if(cur_vpid == vpid)
-       return r;
-    else
-      cur_vpid = vpid;
 
     spin_lock_irqsave(&demux_ops_lock, flags);
     if (demux_ops && demux_ops->set_vid) {
@@ -204,14 +198,8 @@ static int tsdemux_set_vid(int vpid)
 
 static int tsdemux_set_aid(int apid)
 {
-    static int cur_apid = -1;
     unsigned long flags;
     int r = 0;
-
-    if(cur_apid == apid)
-       return r;
-    else
-       cur_apid = apid;
 
     spin_lock_irqsave(&demux_ops_lock, flags);
     if (demux_ops && demux_ops->set_aid) {
@@ -502,7 +490,7 @@ s32 tsdemux_init(u32 vid, u32 aid, u32 sid)
 
     if (fetchbuf == 0) {
         printk("%s: no fetchbuf\n", __FUNCTION__);
-        goto err0;
+        return -ENOMEM;
     }
 
     /* hook stream buffer with PARSER */
@@ -595,16 +583,8 @@ err3:
 err2:
     pts_stop(PTS_TYPE_VIDEO);
 err1:
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-    switch_mod_gate_by_type(MOD_DEMUX, 0);
-#endif
     printk("TS Demux init failed.\n");
     return -ENOENT;
-err0:
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-    switch_mod_gate_by_type(MOD_DEMUX, 0);
-#endif
-    return -ENOMEM;
 }
 
 void tsdemux_release(void)

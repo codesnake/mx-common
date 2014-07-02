@@ -2,25 +2,17 @@
 #ifndef __H264_H__
 #define __H264_H__
 
-#define AMVENC_DEV_VERSION "AML-MT"
-#define INT_AMVENCODER INT_MAILBOX_1A
-
 #define VDEC_166M()  WRITE_MPEG_REG(HHI_VDEC_CLK_CNTL, (5 << 9) | (1 << 8) | (5))
 #define VDEC_200M()  WRITE_MPEG_REG(HHI_VDEC_CLK_CNTL, (5 << 9) | (1 << 8) | (4))
 #define VDEC_250M()  WRITE_MPEG_REG(HHI_VDEC_CLK_CNTL, (5 << 9) | (1 << 8) | (3))
 #define VDEC_333M()  WRITE_MPEG_REG(HHI_VDEC_CLK_CNTL, (5 << 9) | (1 << 8) | (2))
 
 #define HDEC_250M()   WRITE_MPEG_REG(HHI_VDEC_CLK_CNTL, (0 << 25) | (3 << 16) |(1 << 24) | (3  << 9)|(0<<0)|(1<<8) )
-
 #define hvdec_clock_enable() \
     HDEC_250M(); \
     WRITE_VREG(DOS_GCLK_EN0, 0xffffffff)
 
-#define hvdec_clock_disable()  //WRITE_MPEG_REG_BITS(HHI_VDEC_CLK_CNTL,  24, 0, 1);
-
 #define AMVENC_AVC_IOC_MAGIC  'E'
-
-#define AMVENC_AVC_IOC_GET_DEVINFO 				_IOW(AMVENC_AVC_IOC_MAGIC, 0xf0, unsigned int)
 
 #define AMVENC_AVC_IOC_GET_ADDR			 		_IOW(AMVENC_AVC_IOC_MAGIC, 0x00, unsigned int)
 #define AMVENC_AVC_IOC_INPUT_UPDATE				_IOW(AMVENC_AVC_IOC_MAGIC, 0x01, unsigned int)
@@ -36,16 +28,19 @@
 #define AMVENC_AVC_IOC_FLUSH_DMA 				_IOW(AMVENC_AVC_IOC_MAGIC, 0x0b, unsigned int)
 #define AMVENC_AVC_IOC_GET_BUFFINFO 				_IOW(AMVENC_AVC_IOC_MAGIC, 0x0c, unsigned int)
 
+
+
+
 // Memory Address 
 ///////////////////////////////////////////////////////////////////////////
-#define MicrocodeStart        0x0000
-#define MicrocodeEnd          0x3fff  // 4kx32bits
-#define HencTopStart          0x4000 
-#define HencTopEnd            0x4fff  // 128*32 = 0x1000
-#define PredTopStart          0x5000 
-#define PredTopEnd            0x5fff  // 128x32 = 0x1000 
-#define MBBOT_START_0         0x6000
-#define MBBOT_START_1         0x8000
+#define MicrocodeStart        0x01cc0000
+#define MicrocodeEnd          0x01cc3fff  // 4kx32bits
+#define HencTopStart          0x01cc4000 
+#define HencTopEnd            0x01cc4fff  // 128*32 = 0x1000
+#define PredTopStart          0x01cc5000 
+#define PredTopEnd            0x01cc5fff  // 128x32 = 0x1000 
+#define MBBOT_START_0         0x01cc6000
+#define MBBOT_START_1         0x01cc8000
 
 
 #define MB_PER_DMA            (256*16/64) // 256 Lmem can hold MB_PER_DMA TOP Info 
@@ -86,7 +81,6 @@
 #define VB_FULL_REG_0             r2
 
 #define PROCESS_VLC_REG           r3
-#define PROCESS_QDCT_REG          r4
 
 #define MAIN_REG_0                r8
 #define MAIN_REG_1                r9
@@ -138,18 +132,19 @@
 /********************************************
  *  AV Scratch Register Re-Define
 ********************************************/
-#define ENCODER_STATUS					HENC_SCRATCH_0
-#define MEM_OFFSET_REG					HENC_SCRATCH_1
-#define DEBUG_REG						HENC_SCRATCH_2  //0X0ac2
-#define MB_COUNT						HENC_SCRATCH_3
-#define IDR_INIT_COUNT					HENC_SCRATCH_4
-#define IDR_PIC_ID						HENC_SCRATCH_5
-#define FRAME_NUMBER					HENC_SCRATCH_6
-#define PIC_ORDER_CNT_LSB				HENC_SCRATCH_7
-#define LOG2_MAX_PIC_ORDER_CNT_LSB	HENC_SCRATCH_8
-#define LOG2_MAX_FRAME_NUM			HENC_SCRATCH_9
-#define ANC0_BUFFER_ID					HENC_SCRATCH_A
-#define QPPICTURE						HENC_SCRATCH_B
+#define ENCODER_STATUS            HENC_SCRATCH_0
+#define MEM_OFFSET_REG            HENC_SCRATCH_1
+#define DEBUG_REG  				  HENC_SCRATCH_2  //0X0ac2
+#define MB_COUNT				  HENC_SCRATCH_3
+#define IDR_INIT_COUNT			  HENC_SCRATCH_4
+#define IDR_PIC_ID      		  HENC_SCRATCH_5
+#define FRAME_NUMBER			  HENC_SCRATCH_6
+#define PIC_ORDER_CNT_LSB		  HENC_SCRATCH_7
+#define LOG2_MAX_PIC_ORDER_CNT_LSB  HENC_SCRATCH_8
+#define LOG2_MAX_FRAME_NUM  		HENC_SCRATCH_9
+#define ANC0_BUFFER_ID      		HENC_SCRATCH_A
+#define QPPICTURE           		HENC_SCRATCH_B
+
 
 //---------------------------------------------------
 // ENCODER_STATUS define
@@ -213,10 +208,6 @@
 //#define pic_width_in_mbs_minus1        0x00c
 //#define pic_height_in_map_units_minus1 0x00d
 //#define anc0_buffer_id                 0x00e
-//#define me_start_position              0x00f
-//#define ie_me_mb_type                  0x010
-//#define ie_me_mode                     0x011
-//#define ie_cur_ref_sel                 0x012
 
 #define HENC_TOP_LMEM_BEGIN            0x300
 
@@ -260,10 +251,6 @@
 #define HENC_MB_Type_I8MB                        0xd
 #define HENC_MB_Type_IPCM                        0xe
 #define HENC_MB_Type_AUTO                        0xf
-
-#define HENC_MB_CBP_AUTO                         0xff
-#define HENC_SKIP_RUN_AUTO                     0xffff
-
 
 ///////////////////////////////////////////////////////////////////////////
 // TOP/LEFT INFO Define

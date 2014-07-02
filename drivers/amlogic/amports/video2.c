@@ -49,28 +49,7 @@
 #include <linux/poll.h>
 #include <linux/clk.h>
 #include <linux/logo/logo.h>
-
-#ifdef CONFIG_TVIN_VIUIN
-#define USE_TVIN_CAMERA
-#define VDIN_INDEX  0
-#else
-#define VDIN_INDEX  1
-#ifdef CONFIG_VIUIN
-#define CONFIG_TVIN_VIUIN
-#endif
-#endif
-
-
-#ifdef USE_TVIN_CAMERA
 #include <media/amlogic/656in.h>
-#else
-#include "../tvin/tvin_global.h"
-#include "../tvin/vdin/vdin_regs.h"
-#include "../tvin/vdin/vdin_drv.h"
-#include "../tvin/vdin/vdin_ctl.h"
-#include "../tvin/tvin_format_table.h"
-#include "../tvin/tvin_frontend.h"
-#endif
 
 #ifdef CONFIG_PM
 #include <linux/delay.h>
@@ -189,11 +168,11 @@ static int debug_flag = DEBUG_FLAG_BLACKOUT;
 #define MODULE_NAME "amvideo2"
 #define DEVICE_NAME "amvideo2"
 
-//#ifdef CONFIG_AML_VSYNC_FIQ_ENABLE
-//#define FIQ_VSYNC
-//#else
+#ifdef CONFIG_AML_VSYNC_FIQ_ENABLE
+#define FIQ_VSYNC
+#else
 #undef FIQ_VSYNC
-//#endif
+#endif
 
 //#define SLOW_SYNC_REPEAT
 //#define INTERLACE_FIELD_MATCH_PROCESS
@@ -1367,12 +1346,6 @@ static irqreturn_t vsync_isr(int irq, void *dev_id)
                 video_vf_put(vf);
 				throw_frame--;
             }
-#ifndef USE_TVIN_CAMERA
-            else if((vf->type & VIDTYPE_TYPEMASK) == VIDTYPE_INTERLACE_BOTTOM){
-                vf = video_vf_get();
-                video_vf_put(vf);
-            }
-#endif            
             else if((clone_frame_rate_force < 0)||
                     (clone_frame_rate_force == 0 && clone_frame_rate < 0)){
                 vf = video_vf_get();
@@ -1380,7 +1353,7 @@ static irqreturn_t vsync_isr(int irq, void *dev_id)
             }
             else if(clone_vpts_remainder < vsync_pts_inc){
                 vf = video_vf_get();
-#ifdef USE_TVIN_CAMERA
+#ifdef CONFIG_TVIN_VIUIN
 				if(vf->width > 1280){
 					if(clone_frame_scale_width != 0){
 						vdin0_set_hscale(
@@ -2478,7 +2451,7 @@ static void stop_clone(void)
 {
 #ifdef CONFIG_TVIN_VIUIN
     if(tvin_started){
-        stop_tvin_service(VDIN_INDEX);
+        stop_tvin_service(0);
         tvin_started=0;
     }
 #endif
@@ -2488,11 +2461,7 @@ static int start_clone(void)
 {
     int ret = -1;
 #ifdef CONFIG_TVIN_VIUIN
-#ifdef USE_TVIN_CAMERA
     tvin_parm_t para;
-#else
-    vdin_parm_t para;
-#endif    
     const vinfo_t *info = get_current_vinfo();
     if(tvin_started){
       
@@ -2502,7 +2471,7 @@ static int start_clone(void)
         	return 0; // dual display debug
       	}
 	 }
-      stop_tvin_service(VDIN_INDEX);
+      stop_tvin_service(0);
       tvin_started=0;
       ret = 0;
     }
@@ -2517,7 +2486,6 @@ static int start_clone(void)
             WRITE_CBUS_REG_BITS(VPU_VIU_VENC_MUX_CTRL, 2, 8, 4); //reg0x271a,Enable VIU of ENC_P domain to VDIN;
         }
         clone_vpts_remainder = 0;
-#ifdef USE_TVIN_CAMERA
         memset(&para,0,sizeof(tvin_parm_t));
         para.fmt_info.h_active = info->width;
         para.fmt_info.v_active = info->height;
@@ -2526,26 +2494,7 @@ static int start_clone(void)
         para.fmt_info.frame_rate = clone_frame_rate*10;
         para.fmt_info.hsync_phase = 1;
         para.fmt_info.vsync_phase  = 0;
-#else
-        memset( &para, 0, sizeof(para));
-        para.h_active = info->width;
-        para.v_active = info->field_height;
-        para.port  = TVIN_PORT_VIU;
-        para.fmt = TVIN_SIG_FMT_MAX+1;//TVIN_SIG_FMT_MAX+1;TVIN_SIG_FMT_CAMERA_1280X720P_30Hz
-        para.frame_rate = clone_frame_rate*10;
-        para.hsync_phase = 1;
-        para.vsync_phase  = 0;
-        
-        if(info->field_height == (info->height/2)){
-            para.scan_mode = TVIN_SCAN_MODE_INTERLACED;	
-        }
-        else{
-            para.scan_mode = TVIN_SCAN_MODE_PROGRESSIVE;	
-        }
-        //para.cfmt = TVIN_RGB444;
-        //para.reserved = 0; //skip_num
-#endif        
-        start_tvin_service(VDIN_INDEX,&para);
+        start_tvin_service(0,&para);
         tvin_started = 1;
         printk("%s: source %dx%d\n", __func__,info->width, info->height);
         ret = 0;

@@ -26,7 +26,6 @@
 #include <linux/interrupt.h>
 #include <linux/fs.h>
 #include <mach/am_regs.h>
-#include <mach/power_gate.h>
 
 #include <linux/string.h>
 #include <linux/io.h>
@@ -41,22 +40,6 @@
 #include <linux/clk.h>
 #include <linux/logo/logo.h>
 
-#ifndef MESON_CPU_TYPE_MESON8
-#define MESON_CPU_TYPE_MESON8 (MESON_CPU_TYPE_MESON6TV+1)
-#endif
-
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
-#define Wr(adr,val) WRITE_VCBUS_REG(adr, val)
-#define Rd(adr)    READ_VCBUS_REG(adr)
-#define Wr_reg_bits(adr, val, start, len)  WRITE_VCBUS_REG_BITS(adr, val, start, len)
-#else
-#define Wr(adr,val) WRITE_MPEG_REG(adr, val)
-#define Rd(adr)    READ_MPEG_REG(adr)
-#define Wr_reg_bits(adr, val, start, len)  WRITE_MPEG_REG_BITS(adr, val, start, len)
-#endif
-
-//#define RDMA_CHECK_PRE
-
 #define RDMA_TABLE_SIZE                     (PAGE_SIZE)
 
 static ulong* rmda_table = NULL;
@@ -64,11 +47,6 @@ static ulong* rmda_table = NULL;
 static ulong rmda_table_phy_addr = 0, * rmda_table_addr_remap = NULL;
 
 static int rmda_item_count = 0;
-
-#ifdef RDMA_CHECK_PRE    
-static ulong* rmda_table_pre = NULL;
-static int rmda_item_count_pre = 0;
-#endif
 
 static int irq_count = 0;
 
@@ -151,68 +129,57 @@ static int rdma_config(unsigned char type)
     //if(rmda_item_count <= 0)
     //    return 0;
     //printk("%s %x %x %x\n", __func__, rmda_table_phy_addr, rmda_table_addr_remap, rmda_table);
-#if MESON_CPU_TYPE < MESON_CPU_TYPE_MESON8
-    Wr(GCLK_REG_MISC_RDMA, Rd(GCLK_REG_MISC_RDMA)|GCLK_MASK_MISC_RDMA);
-#endif
-    if(rmda_item_count>0){
-        memcpy(rmda_table_addr_remap, rmda_table, rmda_item_count*8);
-#ifdef RDMA_CHECK_PRE    
-        memcpy(rmda_table_pre, rmda_table, rmda_item_count*8);
-#endif        
-    }
-#ifdef RDMA_CHECK_PRE    
-    rmda_item_count_pre = rmda_item_count;
-#endif
+
+    memcpy(rmda_table_addr_remap, rmda_table, rmda_item_count*8);
+
     data32  = 0;
     data32 |= 0                         << 6;   // [31: 6] Rsrv.
     data32 |= ctrl_ahb_wr_burst_size    << 4;   // [ 5: 4] ctrl_ahb_wr_burst_size. 0=16; 1=24; 2=32; 3=48.
     data32 |= ctrl_ahb_rd_burst_size    << 2;   // [ 3: 2] ctrl_ahb_rd_burst_size. 0=16; 1=24; 2=32; 3=48.
     data32 |= 0                         << 1;   // [    1] ctrl_sw_reset.
     data32 |= 0                         << 0;   // [    0] ctrl_free_clk_enable.
-    Wr(RDMA_CTRL, data32);
+    WRITE_MPEG_REG(RDMA_CTRL, data32);
 
     if(type == 0){ //manual RDMA
-        Wr(RDMA_AHB_START_ADDR_MAN, rmda_table_phy_addr);
-        Wr(RDMA_AHB_END_ADDR_MAN,   rmda_table_phy_addr + rmda_item_count*8 - 1);
+        WRITE_MPEG_REG(RDMA_AHB_START_ADDR_MAN, rmda_table_phy_addr);
+        WRITE_MPEG_REG(RDMA_AHB_END_ADDR_MAN,   rmda_table_phy_addr + rmda_item_count*8 - 1);
 
         data32  = 0;
         data32 |= 0                         << 3;   // [31: 3] Rsrv.
         data32 |= 1                         << 2;   // [    2] ctrl_cbus_write_man. 1=Register write; 0=Register read.
         data32 |= 0                         << 1;   // [    1] ctrl_cbus_addr_incr_man. 1=Incremental register access; 0=Non-incremental.
         data32 |= 0                         << 0;   // [    0] ctrl_start_man pulse.
-        Wr(RDMA_ACCESS_MAN, data32);
+        WRITE_MPEG_REG(RDMA_ACCESS_MAN, data32);
         // Manual-start RDMA
         if(rmda_item_count > 0){
-            Wr(RDMA_ACCESS_MAN, Rd(RDMA_ACCESS_MAN) | 1);
+            WRITE_MPEG_REG(RDMA_ACCESS_MAN, READ_MPEG_REG(RDMA_ACCESS_MAN) | 1);
         }
     
-#if MESON_CPU_TYPE < MESON_CPU_TYPE_MESON8
         do{
-            if((Rd(RDMA_STATUS)&0xffffff0f) == 0){
+            if((READ_MPEG_REG(RDMA_STATUS)&0xffffff0f) == 0){
                     break;
             }
         }while(1);
-#endif        
     }
     else if(type == 1){ //vsync trigger RDMA
-        Wr(RDMA_AHB_START_ADDR_1, rmda_table_phy_addr);
-        Wr(RDMA_AHB_END_ADDR_1,   rmda_table_phy_addr + rmda_item_count*8 - 1);
+        WRITE_MPEG_REG(RDMA_AHB_START_ADDR_1, rmda_table_phy_addr);
+        WRITE_MPEG_REG(RDMA_AHB_END_ADDR_1,   rmda_table_phy_addr + rmda_item_count*8 - 1);
 
         if(rmda_item_count > 0){
             data32  = 0;
             data32 |= 0x1                       << 8;   // [15: 8] interrupt inputs enable mask for auto-start 1: vsync int bit 0
             data32 |= 1                         << 5;   // [    5] ctrl_cbus_write_1. 1=Register write; 0=Register read.
             data32 |= 0                         << 1;   // [    1] ctrl_cbus_addr_incr_1. 1=Incremental register access; 0=Non-incremental.
-            Wr(RDMA_ACCESS_AUTO, data32);
+            WRITE_MPEG_REG(RDMA_ACCESS_AUTO, data32);
         }
         else{
-            Wr(RDMA_ACCESS_AUTO, 0);
+            WRITE_MPEG_REG(RDMA_ACCESS_AUTO, 0);
         }
     }
     else if(type == 2){
         int i,j;
         for(i=0; i<rmda_item_count; i++){
-            Wr(rmda_table_addr_remap[i<<1], rmda_table_addr_remap[(i<<1)+1]);
+            WRITE_MPEG_REG(rmda_table_addr_remap[i<<1], rmda_table_addr_remap[(i<<1)+1]);
             if(debug_flag&1)
                 printk("VSYNC_WR(%x)<=%x\n", rmda_table_addr_remap[i<<1], rmda_table_addr_remap[(i<<1)+1]);
         }   
@@ -220,7 +187,7 @@ static int rdma_config(unsigned char type)
     else if(type == 3){
         int i, j;
         for(i=0; i<rmda_item_count; i++){
-            Wr(rmda_table[i<<1], rmda_table[(i<<1)+1]);
+            WRITE_MPEG_REG(rmda_table[i<<1], rmda_table[(i<<1)+1]);
             if(debug_flag&1)
                 printk("VSYNC_WR(%x)<=%x\n", rmda_table[i<<1], rmda_table[(i<<1)+1]);
         }   
@@ -237,18 +204,14 @@ void vsync_rdma_config(void)
 
     if(pre_enable_ != enable_){
         if(((enable_mask>>17)&0x1)==0){
-            Wr(RDMA_ACCESS_MAN, 0);
-            Wr(RDMA_ACCESS_AUTO, 0);
+            WRITE_MPEG_REG(RDMA_ACCESS_MAN, 0);
+            WRITE_MPEG_REG(RDMA_ACCESS_AUTO, 0);
         }
         vsync_rdma_config_delay_flag = false;
     }
     
     if(enable_ == 1){
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
-        rdma_config(1); //triggered by next vsync    
-        vsync_cfg_count++;
-#else
-        if((Rd(RDMA_STATUS)&0xffffff0f) == 0){
+        if((READ_MPEG_REG(RDMA_STATUS)&0xffffff0f) == 0){
             rdma_config(1); //triggered by next vsync    
             vsync_cfg_count++;
         }
@@ -256,7 +219,6 @@ void vsync_rdma_config(void)
             vsync_rdma_config_delay_flag = true;
             rdma_isr_cfg_count++;
         }
-#endif        
     }
     else if( enable_ == 2){
         rdma_config(0); //manually in cur vsync
@@ -294,30 +256,30 @@ static irqreturn_t rdma_isr(int irq, void *dev_id)
 
     irq_count++;
     if(post_line_start){
-        while(((Rd(ENCL_INFO_READ)>>16)&0x1fff)<post_line_start){
+        while(((READ_MPEG_REG(ENCL_INFO_READ)>>16)&0x1fff)<post_line_start){
 	
         }
     }
 
     if(vsync_rdma_config_delay_flag){
-        Wr(RDMA_ACCESS_MAN, 0);
-        Wr(RDMA_ACCESS_AUTO, 0);
+        WRITE_MPEG_REG(RDMA_ACCESS_MAN, 0);
+        WRITE_MPEG_REG(RDMA_ACCESS_AUTO, 0);
         rdma_config(1);
         vsync_rdma_config_delay_flag = false;
     }
     
-    switch(Rd(VPU_VIU_VENC_MUX_CTRL)&0x3){
+    switch(READ_MPEG_REG(VPU_VIU_VENC_MUX_CTRL)&0x3){
         case 0:
-            enc_line = (Rd(ENCL_INFO_READ)>>16)&0x1fff;
+            enc_line = (READ_MPEG_REG(ENCL_INFO_READ)>>16)&0x1fff;
             break;
         case 1:
-            enc_line = (Rd(ENCI_INFO_READ)>>16)&0x1fff;
+            enc_line = (READ_MPEG_REG(ENCI_INFO_READ)>>16)&0x1fff;
             break;
         case 2:
-            enc_line = (Rd(ENCP_INFO_READ)>>16)&0x1fff;
+            enc_line = (READ_MPEG_REG(ENCP_INFO_READ)>>16)&0x1fff;
             break;
         case 3:    
-            enc_line = (Rd(ENCT_INFO_READ)>>16)&0x1fff;
+            enc_line = (READ_MPEG_REG(ENCT_INFO_READ)>>16)&0x1fff;
             break;
     }
     if(enc_line > rdma_done_line_max){
@@ -345,11 +307,8 @@ static int __init rmda_early_init(void)
     }
     
     rmda_table = kmalloc(RDMA_TABLE_SIZE, GFP_KERNEL);
-#ifdef RDMA_CHECK_PRE    
-    rmda_table_pre = kmalloc(RDMA_TABLE_SIZE, GFP_KERNEL);
-#endif    
 
-#if MESON_CPU_TYPE < MESON_CPU_TYPE_MESON8
+#if 1
     request_irq(INT_RDMA, &rdma_isr,
                     IRQF_SHARED, "rdma",
                     (void *)"rdma");
@@ -395,16 +354,8 @@ unsigned long VSYNC_RD_MPEG_REG(unsigned long adr)
 {
     int i;
     int enable_ = ((enable&enable_mask)|(enable_mask>>8))&0xff;
-    unsigned long read_val = Rd(adr);
+    unsigned long read_val = READ_MPEG_REG(adr);
     if((enable_!=0)&&rdma_start){
-#ifdef RDMA_CHECK_PRE    
-        for(i=(rmda_item_count_pre-1); i>=0; i--){
-            if(rmda_table_pre[i<<1]==adr){
-                read_val = rmda_table_pre[(i<<1)+1];
-                break;
-            }
-        }   
-#endif        
         for(i=(rmda_item_count-1); i>=0; i--){
             if(rmda_table[i<<1]==adr){
                 read_val = rmda_table[(i<<1)+1];
@@ -426,7 +377,7 @@ int VSYNC_WR_MPEG_REG(unsigned long adr, unsigned long val)
         rdma_table_prepare_write(adr, val);
     }
     else{
-        Wr(adr,val);
+        WRITE_MPEG_REG(adr,val);
         if(debug_flag&1)
             printk("VSYNC_WR(%x)<=%x\n", adr, val);
     }
@@ -439,16 +390,8 @@ int VSYNC_WR_MPEG_REG_BITS(unsigned long adr, unsigned long val, unsigned long s
     int i;
     int enable_ = ((enable&enable_mask)|(enable_mask>>8))&0xff;
     if((enable_!=0)&&rdma_start){
-        unsigned long read_val = Rd(adr);
+        unsigned long read_val = READ_MPEG_REG(adr);
         unsigned long write_val;
-#ifdef RDMA_CHECK_PRE    
-        for(i=(rmda_item_count_pre-1); i>=0; i--){
-            if(rmda_table_pre[i<<1]==adr){
-                read_val = rmda_table_pre[(i<<1)+1];
-                break;
-            }
-        }   
-#endif
         for(i=(rmda_item_count-1); i>=0; i--){
             if(rmda_table[i<<1]==adr){
                 read_val = rmda_table[(i<<1)+1];
@@ -462,12 +405,12 @@ int VSYNC_WR_MPEG_REG_BITS(unsigned long adr, unsigned long val, unsigned long s
         rdma_table_prepare_write(adr, write_val);
     }
     else{
-        unsigned long read_val = Rd(adr);
+        unsigned long read_val = READ_MPEG_REG(adr);
         unsigned long write_val = (read_val & ~(((1L<<(len))-1)<<(start)))|((unsigned int)(val) << (start));
-        Wr(adr, write_val);
+        WRITE_MPEG_REG(adr, write_val);
         if(debug_flag&1)
             printk("VSYNC_WR(%x)<=%x\n", adr, write_val);
-        //Wr_reg_bits(adr, val, start, len);        
+        //WRITE_MPEG_REG_BITS(adr, val, start, len);        
     }
     return 0;
 }
@@ -496,12 +439,6 @@ void enable_rdma_log(int flag)
         debug_flag &= (~0x1);
 }    
 EXPORT_SYMBOL(enable_rdma_log);
-
-void enable_rdma(int enable_flag)
-{
-    enable = enable_flag;
-}    
-EXPORT_SYMBOL(enable_rdma);
 
 static int  __init rdma_init(void)
 {

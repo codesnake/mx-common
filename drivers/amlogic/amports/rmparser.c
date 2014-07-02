@@ -36,8 +36,6 @@
 #include "streambuf.h"
 #include "streambuf_reg.h"
 #include "rmparser.h"
-#include "ampotrs_priv.h"
-#include <linux/delay.h>
 
 #define MANAGE_PTS
 
@@ -163,12 +161,6 @@ void rmparser_release(void)
 
     return;
 }
-static inline u32 buf_wp(u32 type)
-{
-    return (type == BUF_TYPE_VIDEO) ? READ_VREG(VLD_MEM_VIFIFO_WP) :
-           (type == BUF_TYPE_AUDIO) ? READ_MPEG_REG(AIU_MEM_AIFIFO_MAN_WP) :
-                                      READ_MPEG_REG(PARSER_SUB_START_PTR);
-}
 
 static ssize_t _rmparser_write(const char __user *buf, size_t count)
 {
@@ -176,7 +168,7 @@ static ssize_t _rmparser_write(const char __user *buf, size_t count)
     const char __user *p = buf;
     u32 len;
     int ret;
-    u32 vwp,awp;
+
     if (r > 0) {
         len = min(r, (size_t)FETCHBUF_SIZE);
 
@@ -187,8 +179,7 @@ static ssize_t _rmparser_write(const char __user *buf, size_t count)
         fetch_done = 0;
 
         wmb();
-        vwp=buf_wp(BUF_TYPE_VIDEO);
-        awp=buf_wp(BUF_TYPE_AUDIO);
+
         WRITE_MPEG_REG(PARSER_FETCH_ADDR, virt_to_phys((u8 *)fetchbuf));
         
         WRITE_MPEG_REG(PARSER_FETCH_CMD,
@@ -212,23 +203,9 @@ static ssize_t _rmparser_write(const char __user *buf, size_t count)
             return -ERESTARTSYS;
         }
 
-        
-        if(vwp==buf_wp(BUF_TYPE_VIDEO) && awp==buf_wp(BUF_TYPE_AUDIO)){
-			if((parse_halt+1)%10==1)
-            printk("Video&Audio  WP not changed after write,video %x->%x,Audio:%x-->%x,parse_halt=%d\n",
-            vwp,buf_wp(BUF_TYPE_VIDEO),awp,buf_wp(BUF_TYPE_AUDIO),parse_halt);
-            parse_halt ++;/*wp not changed ,we think have bugs on parser now.*/
-            if(parse_halt > 10 && (stbuf_level(get_buf_by_type(BUF_TYPE_VIDEO))< 1000 || stbuf_level(get_buf_by_type(BUF_TYPE_AUDIO))< 100)) 
-            {/*reset while at  least one is underflow.*/
-                WRITE_MPEG_REG(PARSER_CONTROL, (ES_SEARCH | ES_PARSER_START));
-                printk("reset parse_control=%x\n",READ_MPEG_REG(PARSER_CONTROL));
-            }
-            return -EAGAIN;
-        }else{
-            parse_halt = 0;
-            p += len;
-            r -= len;
-        }
+        p += len;
+        r -= len;
+        parse_halt = 0;
     }   
     return count - r;
 }
@@ -264,7 +241,7 @@ ssize_t rmparser_write(struct file *file,
 	        }
         }
     }
-    towrite=min(towrite,count);
+
     return _rmparser_write(buf, towrite);
 }
 

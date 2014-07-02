@@ -27,7 +27,7 @@ config AM_VIDEO2
 	select AM_VIDEO
 	help
 	  Driver for video2 display.
-	  
+
 config KEEP_FRAME_RESERVED
 	bool "Amlogic Video keep frame used reserved buffer"
 	default n
@@ -42,14 +42,6 @@ config SUPPORT_VIDEO_ON_VPP2
 	help
 	  Support displaying video on vpp2
 
-	  
-config AM_MEMPROTECT
-	bool "Amlogic Video protect video streambuf framebuf"
-	default n
-	depends on  AM_VIDEO
-	help
-	  Select to enable protect video streambuf framebuf.
-	  
 menu "Video Decoders"
 	depends on AM_VIDEO
 config AM_VDEC_MPEG12
@@ -99,14 +91,6 @@ config AM_VDEC_MJPEG
 	select AM_PTSSERVER
 	help
 	  Driver for motion jpeg video decoder.
-
-
-config AM_VDEC_AVS
-	tristate "AMLOGIC AVS Video Decoder"
-	default y
-	select AM_PTSSERVER
-	help
-	  Driver for avs video decoder.
 
 config AM_ENCODER
 	tristate "Amlogic AVC encoder"
