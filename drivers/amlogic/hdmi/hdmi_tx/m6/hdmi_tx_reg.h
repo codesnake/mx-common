@@ -28,7 +28,7 @@
 
 unsigned long hdmi_rd_reg(unsigned long addr);
 
-void hdmi_wr_only_reg(unsigned long addr, unsigned long data);
+#define hdmi_wr_only_reg(addr, data)   hdmi_wr_reg(addr, data)
 
 void hdmi_wr_reg(unsigned long addr, unsigned long data);
 #ifdef AVOS

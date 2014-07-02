@@ -62,16 +62,30 @@ void hdmi_tx_set_N_CTS(unsigned N_value, unsigned CTS)
 {
 }
 
-static void hdmi_tx_construct_aud_packet(Hdmi_tx_audio_para_t* audio_param, unsigned char* AUD_DB, unsigned char* CHAN_STAT_BUF)
+static void hdmi_tx_construct_aud_packet(Hdmi_tx_audio_para_t* audio_param, unsigned char* AUD_DB, unsigned char* CHAN_STAT_BUF, int hdmi_ch)
 {
 #ifndef PCM_USE_INFOFRAME
-    if((audio_param->type == CT_PCM)&&(audio_param->channel_num==CC_2CH)){
+    if(audio_param->type == CT_PCM){
         printk("HDMI Audio Type: PCM\n");
         if(AUD_DB){
 //Note: HDMI Spec V1.4 Page 154
-            AUD_DB[0] = (CC_REFER_TO_STREAM<<4)|(CC_REFER_TO_STREAM) ; 
+            AUD_DB[0] = (CT_PCM<<4)|(audio_param->channel_num) ; 
             AUD_DB[1] = (FS_REFER_TO_STREAM<<2)|SS_REFER_TO_STREAM;
-            AUD_DB[3] = 0; //CA, 2 channel
+            AUD_DB[2] = 0x0;
+            if(audio_param->channel_num == CC_6CH)
+                AUD_DB[3] = 0xb; //CA, 6 channel
+            else if(audio_param->channel_num == CC_8CH){
+                if(hdmi_ch == CC_6CH){
+                    AUD_DB[3] = 0x0b; //CA, 6 channel
+                }
+                else{
+                    AUD_DB[3] = 0x13; //CA, 8 channel
+                                       
+               }
+
+            }
+            else
+                AUD_DB[3] = 0; //CA, 2 channel, default
             AUD_DB[4] = 0;//DM_INH<<7|LSV<<3
         }
         if(CHAN_STAT_BUF){
@@ -218,7 +232,7 @@ static void hdmi_tx_construct_aud_packet(Hdmi_tx_audio_para_t* audio_param, unsi
     }
 }
 
-int hdmitx_set_audio(hdmitx_dev_t* hdmitx_device, Hdmi_tx_audio_para_t* audio_param)
+int hdmitx_set_audio(hdmitx_dev_t* hdmitx_device, Hdmi_tx_audio_para_t* audio_param, int hdmi_ch)
 {
     int i,ret=-1;
     unsigned char AUD_DB[32];
@@ -226,7 +240,7 @@ int hdmitx_set_audio(hdmitx_dev_t* hdmitx_device, Hdmi_tx_audio_para_t* audio_pa
     for(i=0;i<32;i++) AUD_DB[i]=0;
     for(i=0;i<(24*2);i++) CHAN_STAT_BUF[i]=0;
     if(hdmitx_device->HWOp.SetAudMode(hdmitx_device, audio_param)>=0){
-        hdmi_tx_construct_aud_packet(audio_param, AUD_DB, CHAN_STAT_BUF);
+        hdmi_tx_construct_aud_packet(audio_param, AUD_DB, CHAN_STAT_BUF, hdmi_ch);
     
         hdmitx_device->HWOp.SetAudioInfoFrame(AUD_DB, CHAN_STAT_BUF);
         ret = 0;

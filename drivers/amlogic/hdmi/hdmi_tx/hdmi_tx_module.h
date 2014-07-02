@@ -80,6 +80,7 @@ typedef struct hdmi_tx_dev_s {
     }HWOp;
 
     struct hdmi_phy_set_data *brd_phy_data;
+    struct vendor_info_data  *vendor_data;
     
     //wait_queue_head_t   wait_queue;            /* wait queues */
     /*EDID*/
@@ -112,6 +113,7 @@ typedef struct hdmi_tx_dev_s {
     unsigned int  cec_func_config;
     unsigned int  cec_init_ready;
     unsigned int  tv_cec_support;
+    unsigned int  tv_no_edid;           // For some un-well-known TVs, no edid at all
 #ifdef CONFIG_AM_HDMI_REPEATER
     unsigned int  hdcp_repeater_mode;
     unsigned int  repeater_hdcp_cmd; /* 1, start; 2, stop */
@@ -138,7 +140,7 @@ typedef struct hdmi_tx_dev_s {
 #endif        
 
 
-#define HDMITX_VER "2013Apr23a"
+#define HDMITX_VER "2013Aug25a"
 
 /************************************
 *    hdmitx protocol level interface
@@ -161,7 +163,7 @@ extern int hdmitx_set_display(hdmitx_dev_t* hdmitx_device, HDMI_Video_Codes_t Vi
 
 extern int hdmi_set_3d(hdmitx_dev_t* hdmitx_device, int type, unsigned int param);
 
-extern int hdmitx_set_audio(hdmitx_dev_t* hdmitx_device, Hdmi_tx_audio_para_t* audio_param);
+extern int hdmitx_set_audio(hdmitx_dev_t* hdmitx_device, Hdmi_tx_audio_para_t* audio_param, int hdmi_ch);
 
 extern int hdmi_print(int printk_flag, const char *fmt, ...);
 
@@ -233,6 +235,8 @@ extern unsigned char hdmi_audio_off_flag;
 #define HDMITX_INTR_MASKN_CNTL               0x1B
     #define INTR_MASKN_ENABLE   0
     #define INTR_MASKN_DISABLE  1
+    #define INTR_CLEAR          2
+#define HDMITX_HWCMD_HPD_GPI_TEST               0x1C
 
 #define HDMI_HDCP_DELAYTIME_AFTER_DISPLAY    20      // unit: ms
 

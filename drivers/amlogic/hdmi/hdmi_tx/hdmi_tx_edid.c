@@ -116,7 +116,7 @@ static int Edid_find_name_block(unsigned char * data)
 static void Edid_ReceiverProductNameParse(rx_cap_t * pRxCap, unsigned char * data)
 {
     int i = 0;
-    while(data[i] != 0x0a) {
+    while((data[i] != 0x0a) && (data[i] != 0x20) && (i < 13)) {  // some Display Product name end with 0x20, not 0x0a
         pRxCap->ReceiverProductName[i] = data[i];
         i++;
     }
@@ -1100,6 +1100,7 @@ static int edid_hash_calc(unsigned char *hash, const char *data, unsigned int le
 int hdmitx_edid_parse(hdmitx_dev_t* hdmitx_device)
 {
     unsigned char CheckSum ;
+    unsigned char zero_numbers;
     unsigned char BlockCount ;
     unsigned char* EDID_buf = hdmitx_device->EDID_buf;
     int i, j, ret_val ;
@@ -1148,7 +1149,30 @@ int hdmitx_edid_parse(hdmitx_dev_t* hdmitx_device)
         hdmitx_device->hdmi_info.output_state = CABLE_PLUGIN_DVI_OUT;
         hdmi_print(0, "EDID BlockCount=0\n");
         hdmitx_edid_set_default_vic(hdmitx_device);
+
+        // DVI case judgement: only contains one block and checksum valid
+        CheckSum = 0;
+        zero_numbers = 0;
+        for(i = 0; i < 128; i++) {
+            CheckSum += EDID_buf[i];
+            if(EDID_buf[i] == 0)
+                zero_numbers ++;
+        }
+        printk("HDMI: edid blk0 checksum:%d ext_flag:%d\n",CheckSum, EDID_buf[0x7e]);
+        if((CheckSum & 0xff) == 0) {
+            hdmitx_device->RXCap.IEEEOUI = 0;
+        } else {
+            hdmitx_device->RXCap.IEEEOUI = 0x0c03;
+        }
+        if(zero_numbers > 120)
+            hdmitx_device->RXCap.IEEEOUI = 0x0c03;
+
         return 0 ; // do nothing.
+    }
+
+    if((BlockCount == 1) && (EDID_buf[0x81] == 1)) {    // Note: some DVI monitor have more than 1 block
+        hdmitx_device->RXCap.IEEEOUI = 0;
+        return 0;
     }
 
     else if ( BlockCount > EDID_MAX_BLOCK )
@@ -1335,7 +1359,8 @@ void hdmitx_edid_clear(hdmitx_dev_t* hdmitx_device)
     hdmitx_device->vic_count=0;
     pRXCap->VIC_count = 0;
     pRXCap->AUD_count = 0;
-    pRXCap->IEEEOUI = 0;
+    // Note: in most cases, we think that rx is tv and the default IEEEOUI is HDMI Identifier
+    pRXCap->IEEEOUI = 0x000c03;
     pRXCap->native_Mode = 0;
     pRXCap->native_VIC = 0xff;
     pRXCap->RxSpeakerAllocation = 0;

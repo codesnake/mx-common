@@ -47,6 +47,7 @@ extern unsigned int cec_tx_irq_flag;
 extern unsigned int cec_tx_irq_syn_flag;
 void fiq_gpio_test(unsigned int cmd);
 
+
 #define MSG_P0( init, follow, opcode )	{				\
 	gbl_msg[0] = (init)<<4 | (follow);					\
 	gbl_msg[1] = (opcode);								\
@@ -342,14 +343,15 @@ typedef enum {
     CEC_HDMI_PORT_3,
 } cec_hdmi_port_e;
 
-typedef enum {
-    CEC_MENU_LANG_CHN = 0,
-    CEC_MENU_LANG_ENG,
-    CEC_MENU_LANG_JAP,
-    CEC_MENU_LANG_KOR,
-    CEC_MENU_LANG_FRA,
-    CEC_MENU_LANG_GER,
-} cec_menu_lang_e;
+//typedef enum {
+//    CEC_MENU_LANG_CHN = 0,
+//    CEC_MENU_LANG_ENG,
+//    CEC_MENU_LANG_JAP,
+//    CEC_MENU_LANG_KOR,
+//    CEC_MENU_LANG_FRA,
+//    CEC_MENU_LANG_GER,
+//    //CEC_MENU_LANG_UNSUPPORTED = 0xff;
+//} cec_menu_lang_e;
 
 typedef enum {
     OFF = 0,
@@ -412,7 +414,7 @@ typedef struct {
     unsigned char osd_name[16];
     unsigned char osd_name_def[16];
     menu_state_e menu_state;
-    cec_menu_lang_e menu_lang;
+    int menu_lang;
     union {
         struct {
         } display;
@@ -545,7 +547,7 @@ void cec_usrcmd_set_play_mode(unsigned char log_addr, play_mode_e play_mode);
 void cec_usrcmd_get_menu_state(unsigned char log_addr);
 void cec_usrcmd_set_menu_state(unsigned char log_addr, menu_req_type_e menu_req_type);
 void cec_usrcmd_get_menu_language(unsigned char log_addr);
-void cec_usrcmd_set_menu_language(unsigned char log_addr, cec_menu_lang_e menu_lang);
+//void cec_usrcmd_set_menu_language(unsigned char log_addr, cec_menu_lang_e menu_lang);
 void cec_usrcmd_get_active_source(void);
 void cec_usrcmd_set_active_source(void);
 void cec_usrcmd_set_deactive_source(unsigned char log_addr);
@@ -558,6 +560,7 @@ void cec_report_power_status(cec_rx_message_t* pcec_message);
 void cec_active_source(cec_rx_message_t* pcec_message);
 void cec_set_stream_path(cec_rx_message_t* pcec_message);
 void cec_set_osd_name(cec_rx_message_t* pcec_message);
+void cec_set_osd_name_init(void);
 void cec_deactive_source(cec_rx_message_t* pcec_message);
 void cec_set_system_audio_mode(void);
 void cec_system_audio_mode_request(void);

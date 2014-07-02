@@ -29,6 +29,7 @@
 #include "m1/hdmi_tx_reg.h"
 
 static unsigned char hdmi_output_rgb = 0;
+static void hdmitx_set_spd_info(hdmitx_dev_t* hdmitx_device);
 
 static Hdmi_tx_video_para_t hdmi_tx_video_params[] = 
 {
@@ -276,7 +277,7 @@ Hdmi_tx_video_para_t *hdmi_get_video_param(HDMI_Video_Codes_t VideoCode)
 
 static void hdmi_tx_construct_avi_packet(Hdmi_tx_video_para_t *video_param, char* AVI_DB)
 {
-    unsigned char color, bar_info, aspect_ratio, cc, ss, sc, ec;
+    unsigned char color, bar_info, aspect_ratio, cc, ss, sc, ec = 0;
     ss = video_param->ss;
     bar_info = video_param->bar_info;
     if(video_param->color == COLOR_SPACE_YUV444){
@@ -300,7 +301,7 @@ static void hdmi_tx_construct_avi_packet(Hdmi_tx_video_para_t *video_param, char
     sc = video_param->sc;
     if(video_param->cc == CC_ITU601)
         ec = 0;
-    else if(video_param->cc == CC_ITU709)
+    if(video_param->cc == CC_ITU709)
         ec = 1;    // according to CEA-861-D, all other values are reserved
     AVI_DB[2] = (sc) | (ec << 4);
     //AVI_DB[2] = 0;
@@ -338,9 +339,8 @@ void hdmitx_init_parameters(HDMI_TX_INFO_t *info)
 //If not, treated as a DVI Device
 static int is_dvi_device(rx_cap_t* pRXCap)
 {
-    extern int force_output_mode;
-    
-    if(force_output_mode)
+    hdmitx_dev_t *hdmitx_device = container_of(pRXCap, struct hdmi_tx_dev_s, RXCap);
+    if(hdmitx_device->tv_no_edid)
         return 0;
     
     if(pRXCap->IEEEOUI != 0x000c03)
@@ -434,8 +434,8 @@ int hdmitx_set_display(hdmitx_dev_t* hdmitx_device, HDMI_Video_Codes_t VideoCode
             hdmitx_device->HWOp.SetDispMode(hdmitx_device, NULL); //disable HDMI    
         }
     }
+    hdmitx_set_spd_info(hdmitx_device);
     return ret;
-
 }
 
 int hdmi_set_3d(hdmitx_dev_t* hdmitx_device, int type, unsigned int param)
@@ -466,4 +466,28 @@ int hdmi_set_3d(hdmitx_dev_t* hdmitx_device, int type, unsigned int param)
 
 }    
 
+// Set Source Product Descriptor InfoFrame
+static void hdmitx_set_spd_info(hdmitx_dev_t* hdmitx_device)
+{
+    unsigned char SPD_DB[25] = {0x00};
+    unsigned char SPD_HB[3] = {0x83, 0x1, 0x19};
+    unsigned int len = 0;
+    struct vendor_info_data *vend_data;
+    if(hdmitx_device->vendor_data) {
+        vend_data = hdmitx_device->vendor_data;
+    }
+    else {
+        printk("hdmitx: packet: can\'t get vendor data\n");
+        return;
+    }
+    if(vend_data->vendor_name) {
+        len = strlen(vend_data->vendor_name);
+        strncpy(&SPD_DB[0], vend_data->vendor_name, (len > 8) ? 8 : len);
+    }
+    if(vend_data->product_desc) {
+        len = strlen(vend_data->product_desc);
+        strncpy(&SPD_DB[8], vend_data->product_desc, (len > 16) ? 16 : len);
+    }
+    hdmitx_device->HWOp.SetPacket(HDMI_SOURCE_DESCRIPTION, SPD_DB, SPD_HB);
+}
 

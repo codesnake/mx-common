@@ -59,6 +59,7 @@ unsigned long READ_APB_REG(unsigned long addr)
 
 #endif
 
+static DEFINE_SPINLOCK(reg_lock);
 // if the following bits are 0, then access HDMI IP Port will cause system hungup
 #define GATE_NUM    2
 Hdmi_Gate_s hdmi_gate[GATE_NUM] =   {   {HHI_HDMI_CLK_CNTL, 8},
@@ -72,7 +73,6 @@ static void check_cts_hdmi_sys_clk_status(void)
 
     for(i = 0; i < GATE_NUM; i++){
         if(!(aml_read_reg32(CBUS_REG_ADDR(hdmi_gate[i].cbus_addr)) & (1<<hdmi_gate[i].gate_bit))){
-            printk("HDMI Gate Clock is off, turn on now\n");
             aml_set_reg32_bits(CBUS_REG_ADDR(hdmi_gate[i].cbus_addr), 1, hdmi_gate[i].gate_bit, 1);
         }
     }
@@ -81,51 +81,35 @@ static void check_cts_hdmi_sys_clk_status(void)
 unsigned long hdmi_rd_reg(unsigned long addr)
 {
     unsigned long data;
+    unsigned long flags, fiq_flag;
+
+    spin_lock_irqsave(&reg_lock, flags);
+    raw_local_save_flags(fiq_flag);
+    local_fiq_disable();
+
     check_cts_hdmi_sys_clk_status();
-//    WRITE_APB_REG(HDMI_ADDR_PORT, addr);
-//    WRITE_APB_REG(HDMI_ADDR_PORT, addr);
     aml_write_reg32(P_HDMI_ADDR_PORT, addr);
     aml_write_reg32(P_HDMI_ADDR_PORT, addr);
-    
-//    data = READ_APB_REG(HDMI_DATA_PORT);
     data = aml_read_reg32(P_HDMI_DATA_PORT);
-    
+
+    raw_local_irq_restore(fiq_flag);
+    spin_unlock_irqrestore(&reg_lock, flags);
     return (data);
-}
-
-
-void hdmi_wr_only_reg(unsigned long addr, unsigned long data)
-{
-    check_cts_hdmi_sys_clk_status();
-//    WRITE_APB_REG(HDMI_ADDR_PORT, addr);
-//    WRITE_APB_REG(HDMI_ADDR_PORT, addr);
-//    
-//    WRITE_APB_REG(HDMI_DATA_PORT, data);
-    aml_write_reg32(P_HDMI_ADDR_PORT, addr);
-    aml_write_reg32(P_HDMI_ADDR_PORT, addr);
-    
-    aml_write_reg32(P_HDMI_DATA_PORT, data);
 }
 
 void hdmi_wr_reg(unsigned long addr, unsigned long data)
 {
-    unsigned long rd_data;
+    unsigned long flags, fiq_flag;
+
+    spin_lock_irqsave(&reg_lock, flags);
+    raw_local_save_flags(fiq_flag);
+    local_fiq_disable();
     
     check_cts_hdmi_sys_clk_status();
-//    WRITE_APB_REG(HDMI_ADDR_PORT, addr);
-//    WRITE_APB_REG(HDMI_ADDR_PORT, addr);
-//    
-//    WRITE_APB_REG(HDMI_DATA_PORT, data);
     aml_write_reg32(P_HDMI_ADDR_PORT, addr);
     aml_write_reg32(P_HDMI_ADDR_PORT, addr);
-    
     aml_write_reg32(P_HDMI_DATA_PORT, data);
-    rd_data = hdmi_rd_reg (addr);
-    if (rd_data != data) 
-    {
-//        //printk("hdmi_wr_reg(%x,%x) fails to write: %x\n",addr, data, rd_data);
-//       //while(1){};      
-    }
+
+    raw_local_irq_restore(fiq_flag);
+    spin_unlock_irqrestore(&reg_lock, flags);
 }
-
-

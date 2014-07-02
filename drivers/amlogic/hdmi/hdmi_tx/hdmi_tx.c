@@ -34,7 +34,7 @@
 #include <linux/platform_device.h>
 #include <linux/mutex.h>
 #include <linux/cdev.h>
-#include <linux/proc_fs.h> 
+#include <linux/proc_fs.h>
 #include <asm/uaccess.h>
 #include <mach/am_regs.h>
 
@@ -131,7 +131,6 @@ static void hdmitx_late_resume(struct early_suspend *h)
     }
     hdmitx_device.HWOp.Cntl(&hdmitx_device, HDMITX_AUDIO_CNTL, 0);
     hdmitx_device.HWOp.Cntl(&hdmitx_device, HDMITX_HDCP_CNTL, HDCP_OFF);
-    hdmitx_device.internal_mode_change = 0;
     set_disp_mode_auto();
     pr_info("amhdmitx: late resume module %d\n", __LINE__);
     phdmi->HWOp.Cntl((hdmitx_dev_t *)h->param, HDMITX_EARLY_SUSPEND_RESUME_CNTL, HDMITX_LATE_RESUME);
@@ -152,7 +151,8 @@ static struct early_suspend hdmitx_early_suspend_handler = {
 #define INIT_FLAG_POWERDOWN      0x2
 
 #define INIT_FLAG_NOT_LOAD 0x80
-#define HDMI_SINK_NO_EDID       // For sink no edid case. If HDMI CTS, undef HDMI_SINK_NO_EDID
+
+int hdmi_ch = 0;
 
 #ifdef AVOS
 static unsigned char init_flag=INIT_FLAG_POWERDOWN;
@@ -172,9 +172,6 @@ static int hpdmode = 1; /*
 static int force_vout_index = 0;                      
 static int hdmi_prbs_mode = 0xffff; /* 0xffff=disable; 0=PRBS 11; 1=PRBS 15; 2=PRBS 7; 3=PRBS 31*/
 static int hdmi_480p_force_clk = 0; /* 200, 225, 250, 270 */
-#ifdef HDMI_SINK_NO_EDID
-int force_output_mode = 0;   // if 1, then output force without edid  if 0, the with edid
-#endif
 
 // For most cases, we don't use HDCP
 // If using HDCP, need add follow command in boot/init.rc and recovery/boot/init.rc
@@ -225,7 +222,6 @@ return value: 1, vout; 2, vout2;
 {
     int vout_index = 1;
 #ifdef CONFIG_AM_TV_OUTPUT2
-    //const vinfo_t *info;
     if(force_vout_index){
         vout_index = force_vout_index;
     }
@@ -269,16 +265,12 @@ static  int  set_disp_mode(const char *mode)
 {
     int ret=-1;
     HDMI_Video_Codes_t vic;
-#ifndef HDMI_SINK_NO_EDID
-    vic = hdmitx_edid_get_VIC(&hdmitx_device, mode, 1);
-#else
-    if(force_output_mode){
+    if(hdmitx_device.tv_no_edid){
         vic = hdmitx_get_VIC(&hdmitx_device, mode);
     }
     else{
         vic = hdmitx_edid_get_VIC(&hdmitx_device, mode, 1);
     }
-#endif
 
     if(vic != HDMI_Unkown){
         hdmitx_device.mux_hpd_if_pin_high_flag = 1;
@@ -299,7 +291,6 @@ static  int  set_disp_mode(const char *mode)
         hdmitx_device.audio_param_update_flag = 1;
         hdmi_authenticated = -1;
         hdmitx_device.auth_process_timer = AUTH_PROCESS_TIME;
-        hdmitx_device.internal_mode_change = 0;
         set_test_mode();
     }
 
@@ -333,35 +324,34 @@ static int set_disp_mode_auto(void)
     }
     else
         printk("HDMI: get current mode: %s\n", info->name);
+    if(!(hdmitx_device.HWOp.Cntl(&hdmitx_device, HDMITX_HWCMD_HPD_GPI_TEST, 0))) {
+        printk("HDMI: HPD deassert!\n");
+        return -1;
+    }
+
+// If info->name equals to cvbs, then set mode to I mode to hdmi
+    memset(mode, 0, 10);
+    if((strncmp(info->name, "480cvbs", 7) == 0) || (strncmp(info->name, "576cvbs", 7) == 0)) {
+        return -1;
+    }
+    else {
+        memcpy(mode, info->name, strlen(info->name));
+    }
+
     if (info && (strncmp(info->name, "panel", 5) == 0 || strncmp(info->name, "null", 4) == 0)) {
     	hdmitx_device.HWOp.Cntl(&hdmitx_device, HDMITX_OUTPUT_ENABLE, 1);
     } else {
     	hdmitx_device.HWOp.Cntl(&hdmitx_device, HDMITX_OUTPUT_ENABLE, 0);
     }
     hdmitx_device.HWOp.Cntl(&hdmitx_device, HDMITX_AUDIO_CNTL, 0);
-// If info->name equals to cvbs, then set mode to I mode to hdmi
-    memset(mode, 0, 10);
-    if(strncmp(info->name, "480cvbs", 7) == 0) {
-        memcpy(mode, "480i", 4);
-    }
-    else if(strncmp(info->name, "576cvbs", 7) == 0) {
-        memcpy(mode, "576i", 4);
-    }
-    else {
-        memcpy(mode, info->name, strlen(info->name));
-    }
 
     //msleep(500);
-#ifndef HDMI_SINK_NO_EDID
-    vic = hdmitx_edid_get_VIC(&hdmitx_device, mode, (hdmitx_device.disp_switch_config==DISP_SWITCH_FORCE)?1:0);
-#else
-    if(force_output_mode){
+    if(hdmitx_device.tv_no_edid){
         vic = hdmitx_get_VIC(&hdmitx_device, mode);
     }
     else{
         vic = hdmitx_edid_get_VIC(&hdmitx_device, mode, (hdmitx_device.disp_switch_config==DISP_SWITCH_FORCE)?1:0);
     }
-#endif
     vic = hdmitx_edid_get_VIC(&hdmitx_device, mode, (hdmitx_device.disp_switch_config==DISP_SWITCH_FORCE)?1:0);
     hdmitx_device.cur_VIC = HDMI_Unkown;
     ret = hdmitx_set_display(&hdmitx_device, vic); //if vic is HDMI_Unkown, hdmitx_set_display will disable HDMI
@@ -373,7 +363,6 @@ static int set_disp_mode_auto(void)
         hdmitx_device.audio_param_update_flag = 1;
         hdmi_authenticated = -1;
         hdmitx_device.auth_process_timer = AUTH_PROCESS_TIME;
-        hdmitx_device.internal_mode_change = 0;
         set_test_mode();
     }
     if(hdmitx_device.cur_VIC == HDMI_Unkown){
@@ -425,16 +414,12 @@ static unsigned char is_dispmode_valid_for_hdmi(void)
 #else
     vinfo_t* info=&lvideo_info;
 #endif    
-#ifndef HDMI_SINK_NO_EDID
-    vic = hdmitx_edid_get_VIC(&hdmitx_device, info->name, (hdmitx_device.disp_switch_config==DISP_SWITCH_FORCE)?1:0);
-#else
-    if(force_output_mode){
+    if(hdmitx_device.tv_no_edid){
         vic = hdmitx_get_VIC(&hdmitx_device, info->name);
     }
     else{
         vic = hdmitx_edid_get_VIC(&hdmitx_device, info->name, (hdmitx_device.disp_switch_config==DISP_SWITCH_FORCE)?1:0);
     }
-#endif
     return (vic != HDMI_Unkown);
 }
 
@@ -471,6 +456,13 @@ static ssize_t store_cec(struct device * dev, struct device_attribute *attr, con
 //    ssize_t t = cec_usrcmd_get_global_info(buf);    
 //    return t;
 //}
+
+static ssize_t show_cec_config(struct device * dev, struct device_attribute *attr, char * buf)
+{
+    int pos=0;
+    pos+=snprintf(buf+pos, PAGE_SIZE, "P_AO_DEBUG_REG0:0x%x\r\n", aml_read_reg32(P_AO_DEBUG_REG0));
+    return pos;  
+}
 
 static ssize_t store_cec_config(struct device * dev, struct device_attribute *attr, const char * buf, size_t count)
 {
@@ -635,12 +627,10 @@ static ssize_t show_disp_cap(struct device * dev, struct device_attribute *attr,
     char* disp_mode_t[]={"480i","480p","576i","576p","720p","1080i","1080p","720p50hz","1080i50hz","1080p50hz","1080p24hz",NULL};
     char* native_disp_mode = hdmitx_edid_get_native_VIC(&hdmitx_device);
     HDMI_Video_Codes_t vic;
-#ifdef HDMI_SINK_NO_EDID
-    if(force_output_mode){
+    if(hdmitx_device.tv_no_edid){
         pos += snprintf(buf+pos, PAGE_SIZE,"null edid\n");
     }
     else{
-#endif
         for(i=0; disp_mode_t[i]; i++){
             vic = hdmitx_edid_get_VIC(&hdmitx_device, disp_mode_t[i], 0);
             if( vic != HDMI_Unkown){
@@ -653,9 +643,7 @@ static ssize_t show_disp_cap(struct device * dev, struct device_attribute *attr,
                 }
             }
         }
-#ifdef HDMI_SINK_NO_EDID
     }
-#endif
     return pos;    
 }
 
@@ -666,7 +654,6 @@ static ssize_t show_disp_cap_3d(struct device * dev, struct device_attribute *at
     int i,pos=0;
     int j=0;
     char* disp_mode_t[]={"480i","480p","576i","576p","720p","1080i","1080p","720p50hz","1080i50hz","1080p50hz","1080p24hz",NULL};
-    //char* native_disp_mode = hdmitx_edid_get_native_VIC(&hdmitx_device);
     HDMI_Video_Codes_t vic;
 
     for(i=0; disp_mode_t[i]; i++){
@@ -692,6 +679,63 @@ static ssize_t show_disp_cap_3d(struct device * dev, struct device_attribute *at
     pos += snprintf(buf+pos, PAGE_SIZE, "\r\n");
 
     return pos;    
+}
+
+/**/
+static ssize_t show_aud_cap(struct device * dev, struct device_attribute *attr, char * buf)
+{
+    int i,pos=0, j;
+    const char* aud_coding_type[] =  {"ReferToStreamHeader", "PCM", "AC-3", "MPEG1", "MP3", "MPEG2", "AAC", "DTS_ATRAC", 
+				"OneBitAudio", "Dobly_Digital+", "DTS-HD", "MAT", "DST", "WMA_Pro", "Reserved", NULL};
+    const char* aud_sampling_frequency[] = {"ReferToStreamHeader", "32", "44.1", "48", "88.2", "96", "176.4", "192", NULL};
+    const char* aud_sample_size[] = {"ReferToStreamHeader", "16", "20", "24", NULL};
+
+    rx_cap_t* pRXCap = &(hdmitx_device.RXCap);
+    pos += snprintf(buf + pos, PAGE_SIZE, "CodingType, MaxChannels, SamplingFrequency, SampleSize\n");
+    for(i = 0; i< pRXCap->AUD_count; i++) {
+        pos += snprintf(buf + pos, PAGE_SIZE, "%s, %d ch, ", aud_coding_type[pRXCap->RxAudioCap[i].audio_format_code], 
+			pRXCap->RxAudioCap[i].channel_num_max + 1);
+        for(j = 0; j < 7; j++) {
+            if(pRXCap->RxAudioCap[i].freq_cc & (1 << j))
+                pos += snprintf(buf + pos, PAGE_SIZE, "%s/", aud_sampling_frequency[j+1]);
+        }
+        pos += snprintf(buf + pos - 1, PAGE_SIZE, " kHz, ");
+        for(j = 0; j < 3; j++) {
+            if(pRXCap->RxAudioCap[i].cc3 & (1 << j))
+                pos += snprintf(buf + pos, PAGE_SIZE, "%s/", aud_sample_size[j+1]);
+        }
+        pos += snprintf(buf + pos - 1, PAGE_SIZE, " bit\n");
+    }
+
+    return pos;
+}
+
+static ssize_t show_aud_ch(struct device * dev, struct device_attribute *attr, char * buf)
+{
+       int pos = 0;
+       pos += snprintf(buf + pos, PAGE_SIZE, "hdmi_channel = %d ch\n", hdmi_ch);
+       return pos;
+}
+
+static ssize_t store_aud_ch(struct device * dev, struct device_attribute *attr, const char * buf, size_t count)
+{
+    if(strncmp(buf, "6ch", 3) == 0){
+        hdmi_ch = 5; 
+    }
+    else if(strncmp(buf, "8ch", 3) == 0){
+        hdmi_ch = 7; 
+    }
+    else if(strncmp(buf, "2ch", 3) == 0){
+        hdmi_ch = 1; 
+    }
+    else{
+        return count;
+    }
+    
+    hdmitx_device.audio_param_update_flag = 1;
+    hdmitx_device.force_audio_flag = 1;
+
+    return count;    
 }
 
 static ssize_t show_hdcp_ksv_info(struct device * dev, struct device_attribute *attr, char * buf)
@@ -851,12 +895,14 @@ static DEVICE_ATTR(edid, S_IWUSR | S_IRUGO, show_edid, store_edid);
 static DEVICE_ATTR(config, S_IWUSR | S_IRUGO, show_config, store_config);
 static DEVICE_ATTR(debug, S_IWUSR | S_IRUGO, NULL, store_dbg);
 static DEVICE_ATTR(disp_cap, S_IWUSR | S_IRUGO, show_disp_cap, NULL);
+static DEVICE_ATTR(aud_cap, S_IWUSR | S_IRUGO, show_aud_cap, NULL);
+static DEVICE_ATTR(aud_ch, S_IWUSR | S_IRUGO, show_aud_ch, store_aud_ch);
 static DEVICE_ATTR(disp_cap_3d, S_IWUSR | S_IRUGO, show_disp_cap_3d, NULL);
 static DEVICE_ATTR(hdcp_ksv_info, S_IWUSR | S_IRUGO, show_hdcp_ksv_info, NULL);
 static DEVICE_ATTR(hpd_state, S_IWUSR | S_IRUGO, show_hpd_state, NULL);
 static DEVICE_ATTR(log, S_IWUSR | S_IRUGO, show_log, store_log);
 static DEVICE_ATTR(cec, S_IWUSR | S_IRUGO, show_cec, store_cec);
-static DEVICE_ATTR(cec_config, S_IWUSR | S_IRUGO , NULL, store_cec_config);
+static DEVICE_ATTR(cec_config, S_IWUSR | S_IRUGO , show_cec_config, store_cec_config);
 //static DEVICE_ATTR(cec_config, S_IWUGO | S_IRUGO , NULL, store_cec_config);
 static DEVICE_ATTR(cec_lang_config, S_IWUSR | S_IRUGO , show_cec_lang_config, store_cec_lang_config);
 
@@ -986,61 +1032,51 @@ static int hdmitx_notify_callback_a(struct notifier_block *block, unsigned long 
     switch (cmd){
     case AOUT_EVENT_IEC_60958_PCM:
         audio_param->type = CT_PCM;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS;     
         hdmi_print(1, "HDMI: aout notify format PCM\n");
         break;
     case AOUT_EVENT_RAWDATA_AC_3:
         audio_param->type = CT_AC_3;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS; 
         hdmi_print(1, "HDMI: aout notify format AC-3\n");
         break;
     case AOUT_EVENT_RAWDATA_MPEG1:
         audio_param->type = CT_MPEG1;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS; 
         hdmi_print(1, "HDMI: aout notify format MPEG1(Layer1 2)\n");
         break;
     case AOUT_EVENT_RAWDATA_MP3:
         audio_param->type = CT_MP3;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS; 
         hdmi_print(1, "HDMI: aout notify format MP3(MPEG1 Layer3)\n");
         break;
     case AOUT_EVENT_RAWDATA_MPEG2:
         audio_param->type = CT_MPEG2;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS; 
         hdmi_print(1, "HDMI: aout notify format MPEG2\n");
         break;
     case AOUT_EVENT_RAWDATA_AAC:
         audio_param->type = CT_AAC;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS; 
         hdmi_print(1, "HDMI: aout notify format AAC\n");
         break;
     case AOUT_EVENT_RAWDATA_DTS:
         audio_param->type = CT_DTS;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS; 
         hdmi_print(1, "HDMI: aout notify format DTS\n");
         break;
     case AOUT_EVENT_RAWDATA_ATRAC:
         audio_param->type = CT_ATRAC;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS; 
         hdmi_print(1, "HDMI: aout notify format ATRAC\n");
         break;
     case AOUT_EVENT_RAWDATA_ONE_BIT_AUDIO:
         audio_param->type = CT_ONE_BIT_AUDIO;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS; 
         hdmi_print(1, "HDMI: aout notify format One Bit Audio\n");
         break;
     case AOUT_EVENT_RAWDATA_DOBLY_DIGITAL_PLUS:
         audio_param->type = CT_DOLBY_D;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS; 
         //audio_param->sample_rate = FS_48K;//192K;      // FS_48K;       //
         hdmi_print(1, "HDMI: aout notify format Dobly Digital +\n");
@@ -1048,31 +1084,30 @@ static int hdmitx_notify_callback_a(struct notifier_block *block, unsigned long 
         break;
     case AOUT_EVENT_RAWDATA_DTS_HD:
         audio_param->type = CT_DTS_HD;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS; 
         hdmi_print(1, "HDMI: aout notify format DTS-HD\n");
         break;
     case AOUT_EVENT_RAWDATA_MAT_MLP:
         audio_param->type = CT_MAT;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS; 
         hdmi_print(1, "HDMI: aout notify format MAT(MLP)\n");
         break;
     case AOUT_EVENT_RAWDATA_DST:
         audio_param->type = CT_DST;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS; 
         hdmi_print(1, "HDMI: aout notify format DST\n");
         break;
     case AOUT_EVENT_RAWDATA_WMA_PRO:
         audio_param->type = CT_WMA;
-        audio_param->channel_num = CC_2CH;
         audio_param->sample_size = SS_16BITS; 
         hdmi_print(1, "HDMI: aout notify format WMA Pro\n");
         break;
     default:
         break;
     }    
+
+    audio_param->channel_num = substream->runtime->channels - 1;
+
     hdmitx_device.audio_param_update_flag = 1;
     return 0;
 }
@@ -1225,43 +1260,47 @@ hdmi_task_handle(void *data)
                 hdmitx_device->HWOp.Cntl(hdmitx_device, HDMITX_HWCMD_MUX_HPD_IF_PIN_HIGH, 0);
             }
         }
+        if(hdmitx_device->HWOp.Cntl) {
+            static int st = 0;
+            st = hdmitx_device->HWOp.Cntl(hdmitx_device, HDMITX_HWCMD_HPD_GPI_TEST, 0);
+            if((st == 0) && (hdmitx_device->hpd_state == 1)) {
+                hdmitx_device->hpd_event = 2;
+            }
+            if((st == 1) && (hdmitx_device->hpd_state == 0)) {
+                hdmitx_device->hpd_event = 1;
+            }
+        }
         
         if((!hdmi_audio_off_flag)&&(hdmitx_device->audio_param_update_flag)&&
             ((hdmitx_device->cur_VIC != HDMI_Unkown)||(hdmitx_device->force_audio_flag))){
-            hdmitx_set_audio(hdmitx_device, &(hdmitx_device->cur_audio_param));
+            hdmitx_set_audio(hdmitx_device, &(hdmitx_device->cur_audio_param), hdmi_ch);
             hdmitx_device->audio_param_update_flag = 0;
             hdmi_print(1, "HDMI: set audio param\n");
         }
 
         if (hdmitx_device->hpd_event == 1)
         {
-#ifdef HDMI_SINK_NO_EDID
             msleep(500);
-#endif
             hdmitx_device->hpd_state = 1;
 
             if(hdmitx_device->HWOp.GetEDIDData(hdmitx_device)){
                 hdmi_print(1,"HDMI: EDID Ready\n");
                 hdmitx_edid_clear(hdmitx_device);
                 hdmitx_edid_parse(hdmitx_device);
-#ifdef HDMI_SINK_NO_EDID
-                force_output_mode = 0;
-#endif
+                hdmitx_device->tv_no_edid = 0;
                 set_disp_mode_auto();
 
 				switch_set_state(&sdev, 1);
                 cec_node_init(hdmitx_device);
             }    
-#ifdef HDMI_SINK_NO_EDID
             else{
                 hdmi_print(1,"HDMI: EDID Bad\n");
-                force_output_mode = 1;
+                hdmitx_device->tv_no_edid = 1;
                 set_disp_mode_auto();
                 switch_set_state(&sdev, 1);
                 printk("test:aml_read_reg32(P_AO_DEBUG_REG0)%x\n",aml_read_reg32(P_AO_DEBUG_REG0));
                 cec_node_init(hdmitx_device);
             }
-#endif
             if(hdmitx_device->hpd_event ==1)
                 hdmitx_device->hpd_event = 0;
         }
@@ -1413,7 +1452,10 @@ void hdmi_pre_set_change_mode(void)
     hdmitx_device.HWOp.Cntl(&hdmitx_device, HDMITX_IP_SW_RST, TX_SYS_SW_RST);
     //msleep(50);
     hdmitx_device.HWOp.Cntl(&hdmitx_device, HDMITX_INTR_MASKN_CNTL, INTR_MASKN_DISABLE);
-    //msleep(50);
+    hdmitx_device.HWOp.Cntl(&hdmitx_device, HDMITX_INTR_MASKN_CNTL, INTR_CLEAR);
+    msleep(20);
+    printk("%s[%d]\n", __func__, __LINE__);
+    hdmitx_device.internal_mode_change = 0;
 }
 EXPORT_SYMBOL(hdmi_pre_set_change_mode);
 
@@ -1626,6 +1668,8 @@ static int amhdmitx_probe(struct platform_device *pdev)
     ret=device_create_file(hdmitx_dev, &dev_attr_debug);
     ret=device_create_file(hdmitx_dev, &dev_attr_disp_cap);
     ret=device_create_file(hdmitx_dev, &dev_attr_disp_cap_3d);
+    ret=device_create_file(hdmitx_dev, &dev_attr_aud_cap);
+    ret=device_create_file(hdmitx_dev, &dev_attr_aud_ch);
     ret=device_create_file(hdmitx_dev, &dev_attr_hdcp_ksv_info);
     ret=device_create_file(hdmitx_dev, &dev_attr_hpd_state);
     ret=device_create_file(hdmitx_dev, &dev_attr_log);
@@ -1664,6 +1708,8 @@ static int amhdmitx_probe(struct platform_device *pdev)
         hdmi_pdata->hdmi_5v_ctrl(1);
     if(hdmi_pdata && hdmi_pdata->phy_data)
         hdmitx_device.brd_phy_data = hdmi_pdata->phy_data;
+    if(hdmi_pdata && hdmi_pdata->vend_data)
+        hdmitx_device.vendor_data = hdmi_pdata->vend_data;
 
 	switch_dev_register(&sdev);
 	switch_dev_register(&lang_dev);
@@ -1745,7 +1791,6 @@ static int amhdmitx_resume(struct platform_device *pdev)
     hdmitx_device.HWOp.Cntl(&hdmitx_device, HDMITX_OUTPUT_ENABLE, 0);
     hdmitx_device.HWOp.Cntl(&hdmitx_device, HDMITX_AUDIO_CNTL, 0);
     hdmitx_device.HWOp.Cntl(&hdmitx_device, HDMITX_HDCP_CNTL, HDCP_OFF);
-    hdmitx_device.internal_mode_change = 0;
     set_disp_mode_auto();
     pr_info("amhdmitx: resume module %d\n", __LINE__);
 #endif
@@ -1775,6 +1820,7 @@ static int  __init amhdmitx_init(void)
         return 0;
         
     pr_dbg("amhdmitx_init\n");
+    printk("HDMI Ver: %s\n", HDMITX_VER);
     if(hdmi_log_buf_size>0){
         hdmi_log_buf=kmalloc(hdmi_log_buf_size, GFP_KERNEL);
         if(hdmi_log_buf==NULL){
