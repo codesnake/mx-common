@@ -72,7 +72,7 @@ config SECURE_NAND
 config AML_NFTL
 	tristate "Meson NAND FTL support"
 	depends on AM_NAND
-	default n
+	default m
 	help
 	  Support NAND Flash Translation Layer
 	  
