@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2010-2012 ARM Limited. All rights reserved.
+/*
+ * Copyright (C) 2012-2013 ARM Limited. All rights reserved.
  * 
  * This program is free software and is provided to you under the terms of the GNU General Public License version 2
  * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
@@ -13,34 +13,26 @@
  * Implementation of the Mali pause/resume functionality
  */
 
+#include <linux/module.h>
+#include <linux/mali/mali_utgard.h>
 #include "mali_gp_scheduler.h"
 #include "mali_pp_scheduler.h"
-#include "mali_pm.h"
 
-void mali_dev_pause(mali_bool *power_is_on)
+void mali_dev_pause(void)
 {
 	mali_gp_scheduler_suspend();
 	mali_pp_scheduler_suspend();
-
-	/*
-	 * Take and hold the PM lock to be sure we don't change power state as well.
-	 * (it might be unsafe to for instance change frequency if Mali GPU is powered off)
-	 */
-	mali_pm_execute_state_change_lock();	
-	if (NULL != power_is_on)
-	{
-		*power_is_on = mali_pm_is_powered_on();
-	}
+	mali_group_power_off(MALI_FALSE);
+	mali_l2_cache_pause_all(MALI_TRUE);
 }
+
+EXPORT_SYMBOL(mali_dev_pause);
 
 void mali_dev_resume(void)
 {
-	mali_pm_execute_state_change_unlock();
+	mali_l2_cache_pause_all(MALI_FALSE);
 	mali_gp_scheduler_resume();
 	mali_pp_scheduler_resume();
 }
 
-/*
-EXPORT_SYMBOL(mali_dev_pause);
 EXPORT_SYMBOL(mali_dev_resume);
-*/
