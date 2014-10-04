@@ -26,20 +26,55 @@
 #endif
 
 struct rtw_wdev_invit_info {
+	u8 state; /* 0: req, 1:rep */
+	u8 peer_mac[ETH_ALEN];
+	u8 active;
 	u8 token;
 	u8 flags;
 	u8 status;
 	u8 req_op_ch;
-	u8 rsp_op_ch;	
+	u8 rsp_op_ch;
 };
 
 #define rtw_wdev_invit_info_init(invit_info) \
 	do { \
+		(invit_info)->state = 0xff; \
+		_rtw_memset((invit_info)->peer_mac, 0, ETH_ALEN); \
+		(invit_info)->active = 0xff; \
 		(invit_info)->token = 0; \
 		(invit_info)->flags = 0x00; \
 		(invit_info)->status = 0xff; \
 		(invit_info)->req_op_ch = 0; \
 		(invit_info)->rsp_op_ch = 0; \
+	} while (0)
+
+struct rtw_wdev_nego_info {
+	u8 state; /* 0: req, 1:rep, 2:conf */
+	u8 peer_mac[ETH_ALEN];
+	u8 active;
+	u8 token;
+	u8 status;
+	u8 req_intent;
+	u8 req_op_ch;
+	u8 req_listen_ch;
+	u8 rsp_intent;
+	u8 rsp_op_ch;
+	u8 conf_op_ch;
+};
+
+#define rtw_wdev_nego_info_init(nego_info) \
+	do { \
+		(nego_info)->state = 0xff; \
+		_rtw_memset((nego_info)->peer_mac, 0, ETH_ALEN); \
+		(nego_info)->active = 0xff; \
+		(nego_info)->token = 0; \
+		(nego_info)->status = 0xff; \
+		(nego_info)->req_intent = 0xff; \
+		(nego_info)->req_op_ch = 0; \
+		(nego_info)->req_listen_ch = 0; \
+		(nego_info)->rsp_intent = 0xff; \
+		(nego_info)->rsp_op_ch = 0; \
+		(nego_info)->conf_op_ch = 0; \
 	} while (0)
 
 struct rtw_wdev_priv
@@ -59,6 +94,7 @@ struct rtw_wdev_priv
 	u8 provdisc_req_issued;
 
 	struct rtw_wdev_invit_info invit_info;
+	struct rtw_wdev_nego_info nego_info;
 
 	u8 bandroid_scan;
 	bool block;
@@ -71,11 +107,9 @@ struct rtw_wdev_priv
 	
 };
 
-#define wdev_to_priv(w) ((struct rtw_wdev_priv *)(wdev_priv(w)))
+#define wiphy_to_adapter(x) (*((_adapter**)wiphy_priv(x)))
 
-#define wiphy_to_adapter(x) (_adapter *)(((struct rtw_wdev_priv*)wiphy_priv(x))->padapter)
-
-#define wiphy_to_wdev(x) (struct wireless_dev *)(((struct rtw_wdev_priv*)wiphy_priv(x))->rtw_wdev)
+#define wdev_to_ndev(w) ((w)->netdev)
 
 int rtw_wdev_alloc(_adapter *padapter, struct device *dev);
 void rtw_wdev_free(struct wireless_dev *wdev);
@@ -84,10 +118,12 @@ void rtw_wdev_unregister(struct wireless_dev *wdev);
 void rtw_cfg80211_init_wiphy(_adapter *padapter);
 
 void rtw_cfg80211_surveydone_event_callback(_adapter *padapter);
-
+struct cfg80211_bss *rtw_cfg80211_inform_bss(_adapter *padapter, struct wlan_network *pnetwork);
+int rtw_cfg80211_check_bss(_adapter *padapter);
+void rtw_cfg80211_ibss_indicate_connect(_adapter *padapter);
 void rtw_cfg80211_indicate_connect(_adapter *padapter);
 void rtw_cfg80211_indicate_disconnect(_adapter *padapter);
-void rtw_cfg80211_indicate_scan_done(struct rtw_wdev_priv *pwdev_priv, bool aborted);
+void rtw_cfg80211_indicate_scan_done(_adapter *adapter, bool aborted);
 
 #ifdef CONFIG_AP_MODE
 void rtw_cfg80211_indicate_sta_assoc(_adapter *padapter, u8 *pmgmt_frame, uint frame_len);
@@ -104,11 +140,34 @@ int rtw_cfg80211_set_mgnt_wpsp2pie(struct net_device *net, char *buf, int len, i
 bool rtw_cfg80211_pwr_mgmt(_adapter *adapter);
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,4,0))  && !defined(COMPAT_KERNEL_RELEASE)
-#define rtw_cfg80211_rx_mgmt(dev, freq, sig_dbm, buf, len, gfp) cfg80211_rx_mgmt(dev, freq, buf, len, gfp)
-#define rtw_cfg80211_send_rx_assoc(dev, bss, buf, len) cfg80211_send_rx_assoc(dev, buf, len)
+#define rtw_cfg80211_rx_mgmt(adapter, freq, sig_dbm, buf, len, gfp) cfg80211_rx_mgmt((adapter)->pnetdev, freq, buf, len, gfp)
+#elif (LINUX_VERSION_CODE < KERNEL_VERSION(3,6,0))
+#define rtw_cfg80211_rx_mgmt(adapter, freq, sig_dbm, buf, len, gfp) cfg80211_rx_mgmt((adapter)->pnetdev, freq, sig_dbm, buf, len, gfp)
 #else
-#define rtw_cfg80211_rx_mgmt(dev, freq, sig_dbm, buf, len, gfp) cfg80211_rx_mgmt(dev, freq, sig_dbm, buf, len, gfp)
-#define rtw_cfg80211_send_rx_assoc(dev, bss, buf, len) cfg80211_send_rx_assoc(dev, bss, buf, len)
+#define rtw_cfg80211_rx_mgmt(adapter, freq, sig_dbm, buf, len, gfp) cfg80211_rx_mgmt((adapter)->rtw_wdev, freq, sig_dbm, buf, len, gfp)
+#endif
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,4,0))  && !defined(COMPAT_KERNEL_RELEASE)
+#define rtw_cfg80211_send_rx_assoc(adapter, bss, buf, len) cfg80211_send_rx_assoc((adapter)->pnetdev, buf, len)
+#else
+#define rtw_cfg80211_send_rx_assoc(adapter, bss, buf, len) cfg80211_send_rx_assoc((adapter)->pnetdev, bss, buf, len)
+#endif
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,6,0))
+#define rtw_cfg80211_mgmt_tx_status(adapter, cookie, buf, len, ack, gfp) cfg80211_mgmt_tx_status((adapter)->pnetdev, cookie, buf, len, ack, gfp)
+#else
+#define rtw_cfg80211_mgmt_tx_status(adapter, cookie, buf, len, ack, gfp) cfg80211_mgmt_tx_status((adapter)->rtw_wdev, cookie, buf, len, ack, gfp)
+#endif
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,6,0))
+#define rtw_cfg80211_ready_on_channel(adapter, cookie, chan, channel_type, duration, gfp)  cfg80211_ready_on_channel((adapter)->pnetdev, cookie, chan, channel_type, duration, gfp)
+#define rtw_cfg80211_remain_on_channel_expired(adapter, cookie, chan, chan_type, gfp) cfg80211_remain_on_channel_expired((adapter)->pnetdev, cookie, chan, chan_type, gfp)
+#elif (LINUX_VERSION_CODE < KERNEL_VERSION(3,8,0))
+#define rtw_cfg80211_ready_on_channel(adapter, cookie, chan, channel_type, duration, gfp)  cfg80211_ready_on_channel((adapter)->rtw_wdev, cookie, chan, channel_type, duration, gfp)
+#define rtw_cfg80211_remain_on_channel_expired(adapter, cookie, chan, chan_type, gfp) cfg80211_remain_on_channel_expired((adapter)->rtw_wdev, cookie, chan, chan_type, gfp)
+#else
+#define rtw_cfg80211_ready_on_channel(adapter, cookie, chan, channel_type, duration, gfp)  cfg80211_ready_on_channel((adapter)->rtw_wdev, cookie, chan, duration, gfp)
+#define rtw_cfg80211_remain_on_channel_expired(adapter, cookie, chan, chan_type, gfp) cfg80211_remain_on_channel_expired((adapter)->rtw_wdev, cookie, chan, gfp)
 #endif
 
 #endif //__IOCTL_CFG80211_H__

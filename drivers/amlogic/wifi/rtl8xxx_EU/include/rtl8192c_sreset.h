@@ -17,16 +17,12 @@
  *
  *
  ******************************************************************************/
-#ifndef _RTL8192C_SRESET_C_
-#define _RTL8192C_SRESET_C_
+#ifndef _RTL8192C_SRESET_H_
+#define _RTL8192C_SRESET_H_
 
-#include <drv_conf.h>
-#include <osdep_service.h>
-#include <drv_types.h>
 #include <rtw_sreset.h>
 
 #ifdef DBG_CONFIG_ERROR_DETECT
-extern void rtl8192c_silentreset_for_specific_platform(_adapter *padapter);
 extern void rtl8192c_sreset_xmit_status_check(_adapter *padapter);
 extern void rtl8192c_sreset_linked_status_check(_adapter *padapter);
 #endif
