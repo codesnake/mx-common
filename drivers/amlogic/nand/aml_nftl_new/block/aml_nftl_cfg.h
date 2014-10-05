@@ -5,7 +5,7 @@
 
 #define NFTL_DONT_CACHE_DATA                      0
 #define SUPPORT_GC_READ_RECLAIM                   0
-#define SUPPORT_WEAR_LEVELING                     1
+#define SUPPORT_WEAR_LEVELING                     0
 #define NFTL_ERASE                                0
 
 #define SUPPORT_FILL_BLOCK             0

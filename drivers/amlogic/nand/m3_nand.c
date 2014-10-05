@@ -18,6 +18,7 @@
 #include <linux/mtd/partitions.h>
 #include <plat/regops.h>
 
+#include <linux/mtd/blktrans.h>
 #include <mach/nand.h>
 #include <mach/clock.h>
 #include "version.h"
@@ -44,13 +45,11 @@ static char *aml_nand_internal_string[]={
 static struct aml_nand_bch_desc m3_bch_list[] = {
 	[0]=ECC_INFORMATION("NAND_RAW_MODE", NAND_ECC_SOFT_MODE, 0, 0, 0),
 	[1]=ECC_INFORMATION("NAND_SHORT_MODE" ,NAND_ECC_SHORT_MODE, NAND_ECC_UNIT_SHORT, NAND_BCH60_1K_ECC_SIZE, 2),
-	[1]=ECC_INFORMATION("NAND_BCH8_MODE", NAND_ECC_BCH8_MODE, NAND_ECC_UNIT_SIZE, NAND_BCH8_ECC_SIZE, 2),
-	[2]=ECC_INFORMATION("NAND_BCH8_1K_MODE" ,NAND_ECC_BCH8_1K_MODE, NAND_ECC_UNIT_1KSIZE, NAND_BCH8_1K_ECC_SIZE, 2),
-	[3]=ECC_INFORMATION("NAND_BCH16_1K_MODE" ,NAND_ECC_BCH16_1K_MODE, NAND_ECC_UNIT_1KSIZE, NAND_BCH16_1K_ECC_SIZE, 2),
-	[4]=ECC_INFORMATION("NAND_BCH24_1K_MODE" ,NAND_ECC_BCH24_1K_MODE, NAND_ECC_UNIT_1KSIZE, NAND_BCH24_1K_ECC_SIZE, 2),
-	[5]=ECC_INFORMATION("NAND_BCH30_1K_MODE" ,NAND_ECC_BCH30_1K_MODE, NAND_ECC_UNIT_1KSIZE, NAND_BCH30_1K_ECC_SIZE, 2),
-	[6]=ECC_INFORMATION("NAND_BCH40_1K_MODE" ,NAND_ECC_BCH40_1K_MODE, NAND_ECC_UNIT_1KSIZE, NAND_BCH40_1K_ECC_SIZE, 2),
-	[7]=ECC_INFORMATION("NAND_BCH60_1K_MODE" ,NAND_ECC_BCH60_1K_MODE, NAND_ECC_UNIT_1KSIZE, NAND_BCH60_1K_ECC_SIZE, 2),
+	[2]=ECC_INFORMATION("NAND_BCH8_MODE", NAND_ECC_BCH8_MODE, NAND_ECC_UNIT_SIZE, NAND_BCH8_ECC_SIZE, 2),
+	[3]=ECC_INFORMATION("NAND_BCH24_1K_MODE" ,NAND_ECC_BCH24_1K_MODE, NAND_ECC_UNIT_1KSIZE, NAND_BCH24_1K_ECC_SIZE, 2),
+	[4]=ECC_INFORMATION("NAND_BCH30_1K_MODE" ,NAND_ECC_BCH30_1K_MODE, NAND_ECC_UNIT_1KSIZE, NAND_BCH30_1K_ECC_SIZE, 2),
+	[5]=ECC_INFORMATION("NAND_BCH40_1K_MODE" ,NAND_ECC_BCH40_1K_MODE, NAND_ECC_UNIT_1KSIZE, NAND_BCH40_1K_ECC_SIZE, 2),
+	[6]=ECC_INFORMATION("NAND_BCH60_1K_MODE" ,NAND_ECC_BCH60_1K_MODE, NAND_ECC_UNIT_1KSIZE, NAND_BCH60_1K_ECC_SIZE, 2),
 };
 
 #ifdef MX_REVD
@@ -423,6 +422,7 @@ static int m3_nand_options_confirm(struct aml_nand_chip *aml_chip)
 			chip->ecc.bytes = NAND_BCH8_ECC_SIZE;
 			aml_chip->bch_mode = NAND_ECC_BCH8;
 			aml_chip->user_byte_mode = 2;
+			chip->ecc.steps = mtd->writesize / chip->ecc.size;
 			break;
 
 		case NAND_ECC_BCH8_1K_MODE:
@@ -1206,14 +1206,7 @@ static int m3_nand_reboot_notifier(struct notifier_block *nb, unsigned long prio
 		aml_chip = plat->aml_chip;
 		if (aml_chip) {
 			mtd = &aml_chip->mtd;
-#ifdef NEW_NAND_SUPPORT
-			if (mtd) {
-				if((aml_chip->new_nand_info.type) && (aml_chip->new_nand_info.type < 10)){
-					aml_chip->new_nand_info.slc_program_info.exit_enslc_mode(mtd);
-					aml_chip->new_nand_info.read_rety_info.set_default_value(mtd);
-				}
-			}
-#endif
+
 		}
 	}
 
@@ -1360,7 +1353,31 @@ extern int flash_secure_remove(void);
 */
 	return;
 }
-
+int aml_class_register(struct class *class)
+{
+		return class_register(class);
+}
+int aml_register_mtd_blktrans(struct mtd_blktrans_ops *tr)
+{
+		return register_mtd_blktrans(tr);
+}
+int aml_deregister_mtd_blktrans(struct mtd_blktrans_ops *tr)
+{
+	return  deregister_mtd_blktrans(tr);
+}
+int aml_add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
+{
+	return  add_mtd_blktrans_dev(new);
+}
+int aml_del_mtd_blktrans_dev(struct mtd_blktrans_dev *old)
+{
+	return  del_mtd_blktrans_dev(old);
+}
+EXPORT_SYMBOL(aml_class_register);
+EXPORT_SYMBOL(aml_register_mtd_blktrans);
+EXPORT_SYMBOL(aml_deregister_mtd_blktrans);
+EXPORT_SYMBOL(aml_add_mtd_blktrans_dev);
+EXPORT_SYMBOL(aml_del_mtd_blktrans_dev);
 
 ssize_t show_nand_version_info(struct class *class,
 			struct class_attribute *attr,	char *buf)

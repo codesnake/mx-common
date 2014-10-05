@@ -368,8 +368,6 @@ static int aml_nftl_thread(void *arg)
     unsigned long time;
 
 	while (!kthread_should_stop()) {
-//		struct aml_nftl_part_t *aml_nftl_part = aml_nftl_blk->aml_nftl_part;
-
 		mutex_lock(aml_nftl_blk->aml_nftl_lock);
 
 		if(aml_nftl_get_part_write_cache_nums(aml_nftl_blk->aml_nftl_part) > 0){
@@ -378,6 +376,7 @@ static int aml_nftl_thread(void *arg)
 //			if (flush_time_out(&aml_nftl_blk->ts_write_start,&ts_nftl_current,NFTL_FLUSH_DATA_TIME) != 0){
 			if (time_after(time,aml_nftl_blk->time+HZ)){
 				//aml_nftl_dbg("aml_nftl_thread flush data: %d:%s\n", aml_nftl_part->cache.cache_write_nums,aml_nftl_blk->mbd.mtd->name);
+//				aml_nftl_dbg("@%d",aml_nftl_part->cache.cache_write_nums);
 				aml_nftl_blk->flush_write_cache(aml_nftl_blk);
 			}
 		}
@@ -454,7 +453,7 @@ static int aml_nftl_reboot_notifier(struct notifier_block *nb, unsigned long pri
 static void aml_nftl_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 {
 	struct aml_nftl_blk_t *aml_nftl_blk;
-
+	unsigned long part_size ;
 	if (mtd->type != MTD_NANDFLASH)
 		return;
 
@@ -467,10 +466,19 @@ static void aml_nftl_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 //		return;
 //	}
 
+/*
     if(mtd->size < 0x8000000)   // >128M
     {
         return;
-    }
+    }*/
+    if(mtd->writesize < 4096)
+	 part_size = 0x1400000;	//20M
+   else
+	 part_size = 0x8000000;     //128	M	
+	
+    if(mtd->size < part_size)   
+        return;
+   
     PRINT("mtd->name: %s\n",mtd->name);
 
 	aml_nftl_blk = aml_nftl_malloc(sizeof(struct aml_nftl_blk_t));
@@ -527,9 +535,9 @@ static void aml_nftl_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 	}
 #endif
 
-	PRINT("aml_nftl_blk->mbd.tr.name =%s\n",	aml_nftl_blk->mbd.tr->name );
+	PRINT("aml_nftl_blk->mbd.tr.name =%s\n",aml_nftl_blk->mbd.tr->name );
 
-	if (add_mtd_blktrans_dev(&aml_nftl_blk->mbd)){
+	if (aml_add_mtd_blktrans_dev(&aml_nftl_blk->mbd)){
 		aml_nftl_dbg("nftl add blk disk dev failed\n");
 		return;
 	}
@@ -572,7 +580,7 @@ static int aml_nftl_release(struct mtd_blktrans_dev *mbd)
 
 	mutex_lock(aml_nftl_blk->aml_nftl_lock);
 
-//	aml_nftl_dbg("aml_nftl_release flush cache data: %d:%s\n", aml_nftl_part->cache.cache_write_nums,mbd->mtd->name);
+//	aml_nftl_dbg("aml_nftl_release flush cache data:%s\n",mbd->mtd->name);
 	error = aml_nftl_blk->flush_write_cache(aml_nftl_blk);
 
 	mutex_unlock(aml_nftl_blk->aml_nftl_lock);
@@ -609,7 +617,7 @@ static void aml_nftl_remove_dev(struct mtd_blktrans_dev *dev)
 	struct aml_nftl_blk_t *aml_nftl_blk = (void *)dev;
 
 	unregister_reboot_notifier(&aml_nftl_blk->nb);
-	del_mtd_blktrans_dev(dev);
+	aml_del_mtd_blktrans_dev(dev);
 	aml_nftl_free(dev);
 	aml_nftl_blk_release(aml_nftl_blk);
 	aml_nftl_free(aml_nftl_blk);
@@ -650,7 +658,8 @@ static int __init init_aml_nftl(void)
 
     PRINT("init_aml_nftl start\n");
     nftl_num = 0;
-	ret = register_mtd_blktrans(&aml_nftl_tr);
+    //mutex_init(&aml_nftl_lock);
+	ret = aml_register_mtd_blktrans(&aml_nftl_tr);
 	PRINT("init_aml_nftl end\n");
 
 	return ret;
@@ -665,7 +674,7 @@ static int __init init_aml_nftl(void)
 *****************************************************************************/
 static void __exit cleanup_aml_nftl(void)
 {
-	deregister_mtd_blktrans(&aml_nftl_tr);
+	aml_deregister_mtd_blktrans(&aml_nftl_tr);
 }
 
 
@@ -674,7 +683,7 @@ static void __exit cleanup_aml_nftl(void)
 module_init(init_aml_nftl);
 module_exit(cleanup_aml_nftl);
 
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("Proprietary");
 MODULE_AUTHOR("AML xiaojun_yoyo and rongrong_zhou");
 MODULE_DESCRIPTION("aml nftl block interface");
 

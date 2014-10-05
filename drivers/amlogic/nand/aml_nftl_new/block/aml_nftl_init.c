@@ -30,6 +30,8 @@ extern uint32 __nand_flush_write_cache(struct aml_nftl_part_t* part);
 extern uint32 __shutdown_op(struct aml_nftl_part_t* part);
 extern void print_free_list(struct aml_nftl_part_t* part);
 extern void print_block_invalid_list(struct aml_nftl_part_t* part);
+extern int aml_nftl_erase_part(struct aml_nftl_part_t *part);
+extern int aml_nftl_initialize(struct aml_nftl_blk_t *aml_nftl_blk,int no);
 
 uint32 _nand_read(struct aml_nftl_blk_t *aml_nftl_blk,uint32 start_sector,uint32 len,unsigned char *buf);
 uint32 _nand_write(struct aml_nftl_blk_t *aml_nftl_blk,uint32 start_sector,uint32 len,unsigned char *buf);
@@ -41,24 +43,53 @@ void aml_nftl_free(const void *ptr);
 
 static ssize_t show_part_struct(struct class *class,struct class_attribute *attr,char *buf);
 static ssize_t show_list(struct class *class, struct class_attribute *attr, const char *buf);
-static ssize_t do_gc_all(struct class *class, struct class_attribute *attr, const char *buf);
-static ssize_t do_gc_one(struct class *class, struct class_attribute *attr, const char *buf);
-static ssize_t do_flush(struct class *class, struct class_attribute *attr, const char *buf);
+static ssize_t do_gc_all(struct class *class, struct class_attribute *attr, const char *buf, size_t count);
+static ssize_t do_gc_one(struct class *class, struct class_attribute *attr, const char *buf, size_t count);
+static ssize_t do_flush(struct class *class, struct class_attribute *attr, const char *buf, size_t count);
 static ssize_t do_test(struct class *class, struct class_attribute *attr,	const char *buf, size_t count);
+static ssize_t do_erase_init(struct class *class, struct class_attribute *attr,	const char *buf, size_t count);
+static ssize_t do_erase_show(struct class *class, struct class_attribute *attr, const char *buf);
 
 static struct class_attribute nftl_class_attrs[] = {
 //    __ATTR(part_struct,  S_IRUGO | S_IWUSR, show_logic_block_table,    show_address_map_table),
     __ATTR(part,  S_IRUGO , show_part_struct,    NULL),
     __ATTR(list,  S_IRUGO , show_list,    NULL),
-    __ATTR(gcall,  S_IRUGO , do_gc_all,    NULL),
-    __ATTR(flush,  S_IRUGO , do_flush,    NULL),
-    __ATTR(gcone,  S_IRUGO , do_gc_one,    NULL),
+    __ATTR(gcall,  S_IRUGO , NULL,do_gc_all    ),
+    __ATTR(flush,  S_IRUGO ,NULL, do_flush),
+    __ATTR(gcone,  S_IRUGO ,NULL, do_gc_one),
     __ATTR(test,  S_IRUGO | S_IWUSR , NULL,    do_test),
+    __ATTR(erase_init,  S_IRUGO | S_IWUSR , NULL, do_erase_init),
 //    __ATTR(cache_struct,  S_IRUGO , show_logic_block_table,    NULL),
 //    __ATTR(table,  S_IRUGO | S_IWUSR , NULL,    show_logic_page_table),
 
     __ATTR_NULL
 };
+
+int aml_nftl_reinit_part(struct aml_nftl_blk_t *aml_nftl_blk)
+{
+	struct aml_nftl_part_t * part = NULL;
+	int ret =0;
+
+	part = aml_nftl_blk->aml_nftl_part;
+	mutex_lock(aml_nftl_blk->aml_nftl_lock);
+
+	//kthread_stop(aml_nftl_blk->nftl_thread);
+
+	ret = aml_nftl_erase_part(part);
+	if(ret){
+		PRINT("aml_nftl_erase_part : failed\n");
+	}
+
+	if(aml_nftl_initialize(aml_nftl_blk,-1)){
+	   PRINT("aml_nftl_reinit_part : aml_nftl_initialize failed\n");
+	}
+	
+	mutex_unlock(aml_nftl_blk->aml_nftl_lock);
+	//wake_up_process(aml_nftl_blk->nftl_thread);
+	
+	return ret ;
+}
+
 
 /*****************************************************************************
 *Name         :
@@ -101,8 +132,8 @@ int aml_nftl_initialize(struct aml_nftl_blk_t *aml_nftl_blk,int no)
 	uint32_t ret;
 	unsigned char nftl_oob_buf[mtd->oobavail];
 
-	if (mtd->oobavail < MIN_BYTES_OF_USER_PER_PAGE)
-		return -EPERM;
+	//if (mtd->oobavail < MIN_BYTES_OF_USER_PER_PAGE)
+	//	return -EPERM;
 
 	aml_nftl_blk->nftl_cfg.nftl_use_cache = NFTL_DONT_CACHE_DATA;
 	aml_nftl_blk->nftl_cfg.nftl_support_gc_read_reclaim = SUPPORT_GC_READ_RECLAIM;
@@ -127,13 +158,16 @@ int aml_nftl_initialize(struct aml_nftl_blk_t *aml_nftl_blk,int no)
 	aml_nftl_blk->flush_write_cache = _nand_flush_write_cache;
 	aml_nftl_blk->shutdown_op = _shutdown_op;
 
+	if(no < 0){
+	    return ret;
+	}
     //setup class
     if(memcmp(mtd->name, "NFTL_Part", 9)==0)
     {
 		aml_nftl_blk->debug.name = kzalloc(strlen((const char*)AML_NFTL_MAGIC)+1, GFP_KERNEL);
     	strcpy(aml_nftl_blk->debug.name, (char*)AML_NFTL_MAGIC);
     	aml_nftl_blk->debug.class_attrs = nftl_class_attrs;
-   		error = class_register(&aml_nftl_blk->debug);
+   		error = aml_class_register(&aml_nftl_blk->debug);
 		if(error)
 			printk(" class register nand_class fail!\n");
 	}
@@ -143,7 +177,7 @@ int aml_nftl_initialize(struct aml_nftl_blk_t *aml_nftl_blk,int no)
 		aml_nftl_blk->debug.name = kzalloc(strlen((const char*)AML_USERDATA_MAGIC)+1, GFP_KERNEL);
     	strcpy(aml_nftl_blk->debug.name, (char*)AML_USERDATA_MAGIC);
     	aml_nftl_blk->debug.class_attrs = nftl_class_attrs;
-   		error = class_register(&aml_nftl_blk->debug);
+   		error = aml_class_register(&aml_nftl_blk->debug);
 		if(error)
 			printk(" class register nand_class fail!\n");
 	}
@@ -236,7 +270,7 @@ static ssize_t show_list(struct class *class, struct class_attribute *attr, cons
 *Return       :
 *Note         :
 *****************************************************************************/
-static ssize_t do_gc_all(struct class *class, struct class_attribute *attr, const char *buf)
+static ssize_t do_gc_all(struct class *class, struct class_attribute *attr, const char *buf, size_t count)
 {
     struct aml_nftl_blk_t *aml_nftl_blk = container_of(class, struct aml_nftl_blk_t, debug);
 
@@ -251,7 +285,7 @@ static ssize_t do_gc_all(struct class *class, struct class_attribute *attr, cons
 *Return       :
 *Note         :
 *****************************************************************************/
-static ssize_t do_gc_one(struct class *class, struct class_attribute *attr, const char *buf)
+static ssize_t do_gc_one(struct class *class, struct class_attribute *attr, const char *buf, size_t count)
 {
     struct aml_nftl_blk_t *aml_nftl_blk = container_of(class, struct aml_nftl_blk_t, debug);
 
@@ -266,7 +300,7 @@ static ssize_t do_gc_one(struct class *class, struct class_attribute *attr, cons
 *Return       :
 *Note         :
 *****************************************************************************/
-static ssize_t do_flush(struct class *class, struct class_attribute *attr, const char *buf)
+static ssize_t do_flush(struct class *class, struct class_attribute *attr, const char *buf, size_t count)
 {
     int error;
     struct aml_nftl_blk_t *aml_nftl_blk = container_of(class, struct aml_nftl_blk_t, debug);
@@ -293,8 +327,22 @@ static ssize_t do_test(struct class *class, struct class_attribute *attr,	const 
 	uint32 num;
 
 	sscanf(buf, "%x", &num);
-	
+
 	aml_nftl_set_part_test(part,num);
 
     return count;
+}
+static ssize_t do_erase_init(struct class *class, struct class_attribute *attr,const char *buf, size_t count)
+{
+
+	struct aml_nftl_blk_t *aml_nftl_blk = container_of(class, struct aml_nftl_blk_t, debug);
+
+	uint32 ret=0;
+
+	ret = aml_nftl_reinit_part(aml_nftl_blk);
+	if(ret){
+		PRINT("aml_nftl_reinit_part: failed\n");
+	}
+	
+	return count;
 }
